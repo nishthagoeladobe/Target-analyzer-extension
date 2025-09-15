@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Generate Adobe Target Inspector Icons</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        canvas { border: 1px solid #ccc; margin: 10px; }
+        .download-section { margin: 20px 0; }
+        .download-link { display: block; margin: 5px 0; padding: 10px; background: #f0f0f0; text-decoration: none; color: #333; }
+    </style>
+</head>
+<body>
+    <h1>Adobe Target Inspector Icons</h1>
+    <p>Right-click each canvas and select "Save image as..." to download:</p>
+    
+    <div>
+        <h3>16x16 Icon:</h3>
+        <canvas id="icon16" width="16" height="16"></canvas>
+        <div>Save as: <code>icons/icon-16.png</code></div>
+    </div>
+    
+    <div>
+        <h3>48x48 Icon:</h3>
+        <canvas id="icon48" width="48" height="48"></canvas>
+        <div>Save as: <code>icons/icon-48.png</code></div>
+    </div>
+    
+    <div>
+        <h3>128x128 Icon:</h3>
+        <canvas id="icon128" width="128" height="128"></canvas>
+        <div>Save as: <code>icons/icon-128.png</code></div>
+    </div>
+
+    <div class="download-section">
+        <h3>Download Links:</h3>
+        <a href="#" id="download16" class="download-link">Download 16x16 Icon</a>
+        <a href="#" id="download48" class="download-link">Download 48x48 Icon</a>
+        <a href="#" id="download128" class="download-link">Download 128x128 Icon</a>
+    </div>
+
+    <script>
+        function drawTargetIcon(canvas, size) {
+            const ctx = canvas.getContext('2d');
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, size, size);
+            
+            // Background gradient
+            const gradient = ctx.createLinearGradient(0, 0, size, size);
+            gradient.addColorStop(0, '#ff6b35');
+            gradient.addColorStop(1, '#f7931e');
+            
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, size, size);
+            
+            // Target symbol
+            const centerX = size / 2;
+            const centerY = size / 2;
+            const maxRadius = size * 0.35;
+            
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = Math.max(1, size * 0.06);
+            
+            // Outer circle
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, maxRadius, 0, 2 * Math.PI);
+            ctx.stroke();
+            
+            // Middle circle
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, maxRadius * 0.65, 0, 2 * Math.PI);
+            ctx.stroke();
+            
+            // Inner circle (filled)
+            ctx.fillStyle = 'white';
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, maxRadius * 0.3, 0, 2 * Math.PI);
+            ctx.fill();
+        }
+
+        function setupDownload(canvasId, linkId, filename) {
+            const canvas = document.getElementById(canvasId);
+            const link = document.getElementById(linkId);
+            
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                canvas.toBlob((blob) => {
+                    const url = URL.createObjectURL(blob);
+                    const downloadLink = document.createElement('a');
+                    downloadLink.href = url;
+                    downloadLink.download = filename;
+                    downloadLink.click();
+                    URL.revokeObjectURL(url);
+                });
+            });
+        }
+
+        // Draw all icons
+        drawTargetIcon(document.getElementById('icon16'), 16);
+        drawTargetIcon(document.getElementById('icon48'), 48);
+        drawTargetIcon(document.getElementById('icon128'), 128);
+
+        // Setup downloads
+        setupDownload('icon16', 'download16', 'icon-16.png');
+        setupDownload('icon48', 'download48', 'icon-48.png');
+        setupDownload('icon128', 'download128', 'icon-128.png');
+    </script>
+</body>
+</html> 

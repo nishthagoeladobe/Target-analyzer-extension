@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create Adobe Target Inspector Icons - Red & Black</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        
+        .icon-container {
+            display: flex;
+            gap: 20px;
+            margin: 20px 0;
+            align-items: center;
+        }
+        
+        canvas {
+            border: 2px solid #ccc;
+            background: white;
+        }
+        
+        .download-section {
+            margin: 20px 0;
+            padding: 20px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        button {
+            background: #dc2626;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px;
+        }
+        
+        button:hover {
+            background: #b91c1c;
+        }
+        
+        .instructions {
+            background: #fef2f2;
+            border: 1px solid #dc2626;
+            border-radius: 8px;
+            padding: 16px;
+            margin: 20px 0;
+        }
+        
+        h1 {
+            color: #dc2626;
+        }
+        
+        h2 {
+            color: #374151;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎯 Adobe Target Inspector Icons - Red & Black Theme</h1>
+    
+    <div class="instructions">
+        <h2>📋 Instructions:</h2>
+        <ol>
+            <li>Click the "Generate All Icons" button below</li>
+            <li>Right-click on each icon and select "Save image as..."</li>
+            <li>Save them as: <code>icon-16.png</code>, <code>icon-48.png</code>, and <code>icon-128.png</code></li>
+            <li>Replace the existing icons in your <code>icons/</code> folder</li>
+            <li>Reload your extension in Chrome to see the new icons</li>
+        </ol>
+    </div>
+    
+    <div class="download-section">
+        <h2>🎨 Icon Generation</h2>
+        <button onclick="generateAllIcons()">🎯 Generate All Icons</button>
+        <button onclick="downloadAll()">💾 Download All Icons</button>
+        
+        <div class="icon-container">
+            <div>
+                <h3>16x16 (Toolbar)</h3>
+                <canvas id="icon16" width="16" height="16"></canvas>
+            </div>
+            <div>
+                <h3>48x48 (Extension Management)</h3>
+                <canvas id="icon48" width="48" height="48"></canvas>
+            </div>
+            <div>
+                <h3>128x128 (Chrome Web Store)</h3>
+                <canvas id="icon128" width="128" height="128"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function drawTargetIcon(canvas, size) {
+            const ctx = canvas.getContext('2d');
+            const center = size / 2;
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, size, size);
+            
+            // Background circle (black)
+            ctx.fillStyle = '#1f2937';
+            ctx.beginPath();
+            ctx.arc(center, center, center - 1, 0, 2 * Math.PI);
+            ctx.fill();
+            
+            // Adobe Target bullseye design
+            const ringWidth = size * 0.08;
+            const maxRadius = center - ringWidth;
+            
+            // Outer ring (red)
+            ctx.strokeStyle = '#dc2626';
+            ctx.lineWidth = ringWidth;
+            ctx.beginPath();
+            ctx.arc(center, center, maxRadius - ringWidth/2, 0, 2 * Math.PI);
+            ctx.stroke();
+            
+            // Middle ring (white)
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = ringWidth * 0.8;
+            ctx.beginPath();
+            ctx.arc(center, center, maxRadius * 0.65, 0, 2 * Math.PI);
+            ctx.stroke();
+            
+            // Inner circle (red)
+            ctx.fillStyle = '#dc2626';
+            ctx.beginPath();
+            ctx.arc(center, center, maxRadius * 0.35, 0, 2 * Math.PI);
+            ctx.fill();
+            
+            // Center dot (white)
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(center, center, Math.max(1, size * 0.06), 0, 2 * Math.PI);
+            ctx.fill();
+            
+            // Add small "A" for Adobe if size is large enough
+            if (size >= 48) {
+                ctx.fillStyle = '#ffffff';
+                ctx.font = `bold ${size * 0.15}px Arial`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('A', center, center + maxRadius * 0.75);
+            }
+        }
+        
+        function generateAllIcons() {
+            const sizes = [16, 48, 128];
+            sizes.forEach(size => {
+                const canvas = document.getElementById(`icon${size}`);
+                drawTargetIcon(canvas, size);
+            });
+        }
+        
+        function downloadCanvas(canvas, filename) {
+            const link = document.createElement('a');
+            link.download = filename;
+            link.href = canvas.toDataURL();
+            link.click();
+        }
+        
+        function downloadAll() {
+            const sizes = [16, 48, 128];
+            sizes.forEach(size => {
+                const canvas = document.getElementById(`icon${size}`);
+                downloadCanvas(canvas, `icon-${size}.png`);
+            });
+        }
+        
+        // Generate icons on page load
+        window.onload = function() {
+            generateAllIcons();
+        };
+    </script>
+</body>
+</html>

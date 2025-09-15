@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chrome Web Store Assets Generator</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .asset {
+            margin: 30px 0;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            overflow: hidden;
+            position: relative;
+        }
+        .asset-info {
+            background: #f8f9fa;
+            padding: 10px 15px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+        }
+        .promotional-tile {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+            color: white;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        .tile-content {
+            text-align: center;
+            padding: 20px;
+        }
+        .tile-title {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 10px;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        .tile-subtitle {
+            font-size: 16px;
+            opacity: 0.9;
+            margin-bottom: 15px;
+        }
+        .tile-features {
+            font-size: 14px;
+            opacity: 0.8;
+            line-height: 1.4;
+        }
+        .screenshot {
+            background: #f8fafc;
+            border: 2px solid #e5e7eb;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            color: #6b7280;
+            font-weight: 600;
+        }
+        .download-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: #4f46e5;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .download-btn:hover {
+            background: #4338ca;
+        }
+        .instructions {
+            background: #fef3c7;
+            border: 1px solid #f59e0b;
+            border-radius: 6px;
+            padding: 15px;
+            margin-bottom: 30px;
+        }
+        .instructions h3 {
+            margin-top: 0;
+            color: #92400e;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎨 Chrome Web Store Assets</h1>
+        
+        <div class="instructions">
+            <h3>📋 Instructions</h3>
+            <p><strong>Right-click on each asset → "Save image as..." → Save with the exact filename shown</strong></p>
+            <p>These assets are required for Chrome Web Store submission. Upload them in the Developer Dashboard.</p>
+        </div>
+
+        <!-- Small Promotional Tile -->
+        <div class="asset">
+            <div class="asset-info">Small Promotional Tile - 440×280px (Required)</div>
+            <canvas id="smallTile" width="440" height="280" class="promotional-tile">
+                <div class="tile-content">
+                    <div class="tile-title">🎯 Target Inspector</div>
+                    <div class="tile-subtitle">Understand Adobe Target Activities</div>
+                    <div class="tile-features">Real activity names • Response tokens • Non-technical explanations</div>
+                </div>
+            </canvas>
+            <button class="download-btn" onclick="downloadCanvas('smallTile', 'promotional-tile-small-440x280.png')">Download</button>
+        </div>
+
+        <!-- Large Promotional Tile -->
+        <div class="asset">
+            <div class="asset-info">Large Promotional Tile - 920×680px (Optional but Recommended)</div>
+            <canvas id="largeTile" width="920" height="680" class="promotional-tile">
+                <div class="tile-content">
+                    <div class="tile-title" style="font-size: 42px;">🎯 Adobe Target Activity Inspector</div>
+                    <div class="tile-subtitle" style="font-size: 24px; margin-bottom: 25px;">Detect and Understand Personalization Activities</div>
+                    <div class="tile-features" style="font-size: 18px;">
+                        ✅ Real activity names like "Holiday Promotion 2025"<br>
+                        ✅ Both at.js (delivery) and Alloy.js (interact) support<br>
+                        ✅ Response tokens, page modifications, and metrics<br>
+                        ✅ Clean interface with organized tabs
+                    </div>
+                </div>
+            </canvas>
+            <button class="download-btn" onclick="downloadCanvas('largeTile', 'promotional-tile-large-920x680.png')">Download</button>
+        </div>
+
+        <!-- Marquee Promotional Tile -->
+        <div class="asset">
+            <div class="asset-info">Marquee Promotional Tile - 1400×560px (Optional)</div>
+            <canvas id="marqueeTile" width="1400" height="560" class="promotional-tile">
+                <div class="tile-content">
+                    <div class="tile-title" style="font-size: 48px;">🎯 Adobe Target Activity Inspector</div>
+                    <div class="tile-subtitle" style="font-size: 28px; margin-bottom: 30px;">The Ultimate Tool for Understanding Adobe Target Personalization</div>
+                    <div class="tile-features" style="font-size: 20px;">
+                        Perfect for Marketers • QA Teams • Developers • Anyone Curious About Personalization<br>
+                        <br>
+                        ✅ Real Activity Names  ✅ Response Tokens  ✅ Page Modifications  ✅ Privacy Focused
+                    </div>
+                </div>
+            </canvas>
+            <button class="download-btn" onclick="downloadCanvas('marqueeTile', 'promotional-tile-marquee-1400x560.png')">Download</button>
+        </div>
+
+        <!-- Screenshot Templates -->
+        <div class="asset">
+            <div class="asset-info">Screenshot 1 - Main Interface - 1280×800px (Required)</div>
+            <div id="screenshot1" class="screenshot" style="width: 1280px; height: 800px;">
+                📸 Take screenshot of extension popup showing detected activities
+            </div>
+            <button class="download-btn" onclick="alert('Take a real screenshot of your extension in action and save as screenshot-1-main-interface-1280x800.png')">Instructions</button>
+        </div>
+
+        <div class="asset">
+            <div class="asset-info">Screenshot 2 - Details Tab - 1280×800px (Required)</div>
+            <div id="screenshot2" class="screenshot" style="width: 1280px; height: 800px;">
+                📸 Take screenshot of extension showing activity details tab
+            </div>
+            <button class="download-btn" onclick="alert('Take a real screenshot of the details tab and save as screenshot-2-details-tab-1280x800.png')">Instructions</button>
+        </div>
+
+        <div class="asset">
+            <div class="asset-info">Screenshot 3 - Response Tokens - 1280×800px (Recommended)</div>
+            <div id="screenshot3" class="screenshot" style="width: 1280px; height: 800px;">
+                📸 Take screenshot showing response tokens and explanations
+            </div>
+            <button class="download-btn" onclick="alert('Take a real screenshot of response tokens and save as screenshot-3-response-tokens-1280x800.png')">Instructions</button>
+        </div>
+
+        <h2>📝 Next Steps for Chrome Web Store</h2>
+        <ol>
+            <li><strong>Download all promotional tiles</strong> using the buttons above</li>
+            <li><strong>Take real screenshots</strong> of your extension working on actual websites</li>
+            <li><strong>Create Chrome Web Store developer account</strong> ($5 one-time fee)</li>
+            <li><strong>Upload your extension zip file</strong> (adobe-target-inspector-v1.0.0.zip)</li>
+            <li><strong>Add store listing information</strong> (name, description, category)</li>
+            <li><strong>Upload all promotional images and screenshots</strong></li>
+            <li><strong>Submit for review</strong> (typically takes 1-3 days)</li>
+        </ol>
+    </div>
+
+    <script>
+        // Draw promotional tiles on canvas elements
+        function drawTile(canvasId, title, subtitle, features, titleSize = 28) {
+            const canvas = document.getElementById(canvasId);
+            const ctx = canvas.getContext('2d');
+            
+            // Create gradient background
+            const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+            gradient.addColorStop(0, '#dc2626');
+            gradient.addColorStop(1, '#991b1b');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Set text properties
+            ctx.fillStyle = 'white';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            
+            // Title
+            ctx.font = `bold ${titleSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`;
+            ctx.shadowColor = 'rgba(0,0,0,0.3)';
+            ctx.shadowBlur = 4;
+            ctx.shadowOffsetY = 2;
+            ctx.fillText(title, centerX, centerY - 40);
+            
+            // Subtitle
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetY = 0;
+            ctx.font = `${titleSize * 0.6}px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`;
+            ctx.globalAlpha = 0.9;
+            ctx.fillText(subtitle, centerX, centerY);
+            
+            // Features
+            ctx.font = `${titleSize * 0.5}px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`;
+            ctx.globalAlpha = 0.8;
+            const lines = features.split('\n');
+            lines.forEach((line, index) => {
+                ctx.fillText(line, centerX, centerY + 40 + (index * (titleSize * 0.6)));
+            });
+            
+            ctx.globalAlpha = 1;
+        }
+        
+        // Initialize tiles
+        window.onload = function() {
+            drawTile('smallTile', '🎯 Target Inspector', 'Understand Adobe Target Activities', 'Real activity names • Response tokens • Non-technical explanations', 20);
+            drawTile('largeTile', '🎯 Adobe Target Activity Inspector', 'Detect and Understand Personalization Activities', 
+                '✅ Real activity names like "Holiday Promotion 2025"\n✅ Both at.js (delivery) and Alloy.js (interact) support\n✅ Response tokens, page modifications, and metrics\n✅ Clean interface with organized tabs', 32);
+            drawTile('marqueeTile', '🎯 Adobe Target Activity Inspector', 'The Ultimate Tool for Understanding Adobe Target Personalization', 
+                'Perfect for Marketers • QA Teams • Developers • Anyone Curious About Personalization\n\n✅ Real Activity Names  ✅ Response Tokens  ✅ Page Modifications  ✅ Privacy Focused', 36);
+        };
+        
+        function downloadCanvas(canvasId, filename) {
+            const canvas = document.getElementById(canvasId);
+            const link = document.createElement('a');
+            link.download = filename;
+            link.href = canvas.toDataURL();
+            link.click();
+        }
+    </script>
+</body>
+</html>

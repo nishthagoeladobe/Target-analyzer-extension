@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Adobe Target Inspector</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <div class="header-content">
+        <div class="logo">
+          <img src="icons/icon-48.png" alt="Adobe Target Inspector" class="logo-icon">
+          <h1>Adobe Target Inspector</h1>
+        </div>
+        <div class="status" id="status">
+          <span class="status-indicator" id="statusIndicator"></span>
+          <span id="statusText">Monitoring...</span>
+        </div>
+      </div>
+    </header>
+
+    <div class="tabs">
+      <button class="tab-button active" data-tab="activities">Activities</button>
+      <button class="tab-button" data-tab="details">Details</button>
+      <button class="tab-button" data-tab="explanation">Explanation</button>
+    </div>
+
+    <div class="tab-content">
+      <!-- Activities Tab -->
+      <div id="activities" class="tab-panel active">
+        <div class="activity-summary" id="activitySummary">
+          <div class="summary-card">
+            <div class="summary-number" id="totalActivities">0</div>
+            <div class="summary-label">Total Activities</div>
+          </div>
+          <div class="summary-card">
+            <div class="summary-number" id="activeMboxes">0</div>
+            <div class="summary-label">Active Mboxes</div>
+          </div>
+        </div>
+
+        <div class="activity-actions" id="activityActions" style="display: none;">
+          <button class="btn-secondary copy-all-btn" id="copyAllActivities">
+            📊 Download Excel Report
+          </button>
+        </div>
+
+        <div class="loading-container" id="loadingContainer" style="display: none;">
+          <div class="spinner"></div>
+          <p>Detecting Adobe Target activities...</p>
+        </div>
+
+        <div class="activity-list" id="activityList">
+          <div class="empty-state" id="emptyState">
+            <div class="empty-icon">🎯</div>
+            <h3>No Adobe Target activities detected</h3>
+            <p>Browse the website to see personalization and testing activities.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Details Tab -->
+      <div id="details" class="tab-panel">
+        <div id="detailsContent" class="details-content">
+          <div class="empty-details">
+            <div class="empty-icon">📋</div>
+            <h3>No activity details available</h3>
+            <p>Click on an activity in the Activities tab to see detailed information.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Explanation Tab -->
+      <div id="explanation" class="tab-panel">
+        <div class="explanation-content">
+          <h2>🎯 What is Adobe Target?</h2>
+          <p>Adobe Target is a tool that helps websites show different content to different visitors to improve their experience and increase business results.</p>
+          
+          <h3>📊 Response Parameters Explained:</h3>
+          <p>When you see data in the Details section, here's what each parameter means:</p>
+
+          <div class="parameter-section">
+            <h4>🏷️ Response Tokens</h4>
+            <div class="param-explanation">
+              <strong>activity.name:</strong> The name of the marketing campaign or test (e.g., "Holiday Promotion 2025")
+            </div>
+            <div class="param-explanation">
+              <strong>activity.id:</strong> Unique number identifying this specific campaign
+            </div>
+            <div class="param-explanation">
+              <strong>experience.name:</strong> Which version of the test you're seeing (e.g., "Version A", "Control")
+            </div>
+            <div class="param-explanation">
+              <strong>experience.id:</strong> Unique number for this specific version
+            </div>
+            <div class="param-explanation">
+              <strong>geo.dma:</strong> Your geographic market area (like "denver", "new-york")
+            </div>
+            <div class="param-explanation">
+              <strong>geo.zip:</strong> Your zip code area for location-based targeting
+            </div>
+            <div class="param-explanation">
+              <strong>profile.categoryAffinities:</strong> Your interests based on browsing (e.g., "mortgage", "credit-card")
+            </div>
+          </div>
+
+          <div class="parameter-section">
+            <h4>📋 Request Details</h4>
+            <div class="param-explanation">
+              <strong>id.tntId:</strong> Your unique visitor ID for Adobe Target
+            </div>
+            <div class="param-explanation">
+              <strong>id.marketingCloudVisitorId:</strong> Your Adobe Experience Cloud visitor ID
+            </div>
+            <div class="param-explanation">
+              <strong>execute.pageLoad:</strong> Request to get content for the main page
+            </div>
+            <div class="param-explanation">
+              <strong>execute.mboxes:</strong> Specific areas on the page requesting personalized content
+            </div>
+            <div class="param-explanation">
+              <strong>prefetch.views:</strong> Pre-loading content for single-page applications
+            </div>
+          </div>
+
+          <div class="parameter-section">
+            <h4>📤 Analytics Integration</h4>
+            <div class="param-explanation">
+              <strong>analytics.logging:</strong> Whether Adobe Analytics is tracking this activity
+            </div>
+            <div class="param-explanation">
+              <strong>analytics.payload:</strong> Data being sent to Adobe Analytics for reporting
+            </div>
+            <div class="param-explanation">
+              <strong>trackingServer:</strong> The server collecting your analytics data
+            </div>
+            <div class="param-explanation">
+              <strong>trackingServerSecure:</strong> Secure server for analytics data collection
+            </div>
+          </div>
+
+          <div class="parameter-section">
+            <h4>🎨 Page Modifications</h4>
+            <div class="param-explanation">
+              <strong>type: "setHtml":</strong> Replacing content on the page with new HTML
+            </div>
+            <div class="param-explanation">
+              <strong>selector:</strong> Which part of the page is being changed (CSS selector)
+            </div>
+            <div class="param-explanation">
+              <strong>content:</strong> The new content being displayed to you
+            </div>
+          </div>
+
+          <div class="parameter-section">
+            <h4>📊 Implementation Types</h4>
+            <div class="param-explanation">
+              <strong>at.js (Red Badge):</strong> Traditional Adobe Target implementation using delivery calls
+            </div>
+            <div class="param-explanation">
+              <strong>alloy.js (Black Badge):</strong> Modern Adobe Experience Platform Web SDK using interact calls
+            </div>
+          </div>
+
+          <div class="parameter-section">
+            <h4>🔄 Alloy.js (Web SDK) Specific Parameters</h4>
+            <div class="param-explanation">
+              <strong>scope:</strong> The location on the page where content should be delivered (e.g., "__view__", "BOA_HOME_SIGNON_BANNER")
+            </div>
+            <div class="param-explanation">
+              <strong>scopeDetails.decisionProvider:</strong> Always "TGT" for Adobe Target decisions
+            </div>
+            <div class="param-explanation">
+              <strong>scopeDetails.activity.id:</strong> Unique identifier for the Target activity
+            </div>
+            <div class="param-explanation">
+              <strong>scopeDetails.experience.id:</strong> Which variation of the test you're seeing
+            </div>
+            <div class="param-explanation">
+              <strong>scopeDetails.correlationID:</strong> Unique tracking ID linking activity, experience, and traffic allocation
+            </div>
+            <div class="param-explanation">
+              <strong>characteristics.displayToken:</strong> Token used for tracking when content is displayed
+            </div>
+            <div class="param-explanation">
+              <strong>characteristics.clickToken:</strong> Token used for tracking when content is clicked
+            </div>
+            <div class="param-explanation">
+              <strong>items[].schema:</strong> Type of content being delivered (html-content-item, measurement, etc.)
+            </div>
+            <div class="param-explanation">
+              <strong>items[].data.format:</strong> Content format like "text/html" for HTML content
+            </div>
+            <div class="param-explanation">
+              <strong>items[].data.content:</strong> The actual content/HTML being delivered to the page
+            </div>
+          </div>
+
+          <div class="parameter-section">
+            <h4>🏗️ Handle Array Structure (Alloy.js)</h4>
+            <div class="param-explanation">
+              <strong>handle[].type:</strong> Type of response - "personalization:decisions" for Target content
+            </div>
+            <div class="param-explanation">
+              <strong>handle[].payload:</strong> Array containing all the decisions/activities for this request
+            </div>
+            <div class="param-explanation">
+              <strong>handle[].eventIndex:</strong> Which event in the request this response corresponds to
+            </div>
+          </div>
+
+          <div class="parameter-section">
+            <h4>⚖️ Key Differences: at.js vs Alloy.js</h4>
+            <div class="param-explanation">
+              <strong>at.js Delivery Calls:</strong> Use "mboxes" and "execute" structure with response tokens in meta data
+            </div>
+            <div class="param-explanation">
+              <strong>Alloy.js Interact Calls:</strong> Use "scopes" and "handle" structure with decisions and characteristics
+            </div>
+            <div class="param-explanation">
+              <strong>Content Delivery:</strong> at.js uses pageLoad/mboxes, Alloy.js uses scoped decisions
+            </div>
+            <div class="param-explanation">
+              <strong>Tracking Tokens:</strong> at.js uses eventTokens, Alloy.js uses displayToken/clickToken
+            </div>
+          </div>
+
+          <h3>🔍 Why This Matters:</h3>
+          <p>This data helps you understand:</p>
+          <ul>
+            <li>What personalized content you're seeing</li>
+            <li>Why you're seeing specific experiences</li>
+            <li>How the website is tracking your interactions</li>
+            <li>What tests or campaigns are currently running</li>
+            <li>Which Adobe Target implementation the site is using</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <footer class="footer">
+      <div class="controls">
+        <button id="clearActivities" class="btn btn-secondary">Clear Activities</button>
+        <button id="refreshActivities" class="btn btn-primary">🔄 Reload Page</button>
+      </div>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html> 
