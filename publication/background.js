@@ -7,6 +7,25 @@ class AdobeTargetDebugger {
     this.init();
   }
 
+  // Utility method to check if a tab is debuggable
+  isTabDebuggable(url) {
+    if (!url) return false;
+    
+    const systemUrls = [
+      'chrome://', 'chrome-extension://', 'edge://', 'moz-extension://',
+      'about:', 'file://', 'chrome-search://', 'chrome-native://', 'devtools://'
+    ];
+    
+    const protectedPages = [
+      'chrome.google.com/webstore', 'addons.mozilla.org', 'microsoftedge.microsoft.com'
+    ];
+    
+    const isSystemTab = systemUrls.some(prefix => url.startsWith(prefix));
+    const isProtectedPage = protectedPages.some(domain => url.includes(domain));
+    
+    return !isSystemTab && !isProtectedPage;
+  }
+
   init() {
     // Handle messages from popup
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -25,7 +44,13 @@ class AdobeTargetDebugger {
         console.log('🔄 DEBUGGER: Tab loading, clearing activities:', tabId);
         this.clearTabActivities(tabId);
       }
-      if (changeInfo.status === 'complete') {
+      if (changeInfo.status === 'complete' && tab?.url) {
+        // Check if the tab URL is debuggable before attempting to start debugging
+        if (!this.isTabDebuggable(tab.url)) {
+          console.log('🔄 DEBUGGER: Skipping auto-debugging for system/protected page:', tab.url.substring(0, 50) + '...');
+          return;
+        }
+        
         console.log('🔄 DEBUGGER: Tab complete, starting debugging with delay:', tabId);
         // Small delay to ensure page is fully loaded
         setTimeout(() => {
@@ -108,15 +133,21 @@ class AdobeTargetDebugger {
       return;
     }
 
-    // Validate tab exists
+    // Validate tab exists and is debuggable
     try {
       const tab = await chrome.tabs.get(tabId);
-      if (!tab || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) {
-        console.log('⚠️ DEBUGGER: Skipping system tab:', tab?.url);
+      if (!tab) {
+        console.log('⚠️ DEBUGGER: Tab not found:', tabId);
         return;
       }
+      
+      if (!this.isTabDebuggable(tab.url)) {
+        console.log('⚠️ DEBUGGER: Skipping system/protected tab:', tab.url.substring(0, 50) + '...');
+        return;
+      }
+      
     } catch (error) {
-      console.error('❌ DEBUGGER: Invalid tab ID:', tabId);
+      console.error('❌ DEBUGGER: Invalid tab ID:', tabId, error.message);
       return;
     }
 
@@ -153,15 +184,23 @@ class AdobeTargetDebugger {
     } catch (error) {
       console.error('❌ DEBUGGER: Error attaching debugger:', error.message);
       
+      // Handle specific error types
       if (error.message.includes('already attached') || error.message.includes('Another debugger')) {
-        console.log('🔧 DEBUGGER: DevTools conflict detected - creating fallback activity');
-        // Create a fallback activity to show the extension is working
-        this.createFallbackActivity(tabId);
+        console.log('🔧 DEBUGGER: DevTools conflict detected');
+        // Don't create fallback for DevTools conflicts, just skip silently
       } else if (error.message.includes('No tab with given id')) {
         console.log('⚠️ DEBUGGER: Tab no longer exists:', tabId);
+      } else if (error.message.includes('extensions gallery cannot be scripted') || 
+                 error.message.includes('Cannot attach to') ||
+                 error.message.includes('Cannot access')) {
+        console.log('⚠️ DEBUGGER: Protected page - debugger access not allowed');
+        // This is normal for system pages, don't create fallback activities
+      } else if (error.message.includes('Target closed') || 
+                 error.message.includes('Session does not exist')) {
+        console.log('⚠️ DEBUGGER: Tab or session no longer available');
       } else {
-        console.log('🔧 DEBUGGER: Unexpected error - creating fallback activity');
-        this.createFallbackActivity(tabId);
+        console.log('🔧 DEBUGGER: Unexpected error, but continuing silently:', error.message);
+        // Don't create fallback activities for unknown errors as they can cause confusion
       }
       
       this.debuggingSessions.delete(tabId);

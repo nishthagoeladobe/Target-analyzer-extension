@@ -59,6 +59,14 @@
             <p>Browse the website to see personalization and testing activities.</p>
           </div>
         </div>
+
+        <!-- Activities Tab Controls -->
+        <div class="activities-controls">
+          <div class="controls">
+            <button id="clearActivities" class="btn btn-secondary">Clear Activities</button>
+            <button id="refreshActivities" class="btn btn-primary">🔄 Reload Page</button>
+          </div>
+        </div>
       </div>
 
       <!-- Details Tab -->
@@ -236,16 +244,22 @@
             <li>What tests or campaigns are currently running</li>
             <li>Which Adobe Target implementation the site is using</li>
           </ul>
+
+          <div class="parameter-section report-error-section">
+            <h4>🐛 Report Error or Issue</h4>
+            <p>Found a bug or have feedback? Let us know!</p>
+            <div class="error-report-form">
+              <textarea id="errorReportText" placeholder="Describe the issue you're experiencing, what website you were on, what you expected to see vs what actually happened..." rows="4"></textarea>
+              <div class="report-actions">
+                <button id="submitErrorReport" class="btn btn-primary">📧 Send Report</button>
+                <span id="reportStatus" class="report-status"></span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
 
-    <footer class="footer">
-      <div class="controls">
-        <button id="clearActivities" class="btn btn-secondary">Clear Activities</button>
-        <button id="refreshActivities" class="btn btn-primary">🔄 Reload Page</button>
-      </div>
-    </footer>
   </div>
 
   <script src="popup.js"></script>

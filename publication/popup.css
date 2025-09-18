@@ -151,9 +151,10 @@ body {
   border-left: 4px solid #dc2626;
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   cursor: pointer;
   transition: all 0.2s ease;
+  min-height: 60px;
 }
 
 .activity-item:hover {
@@ -243,12 +244,21 @@ body {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
+  align-items: start;
+}
+
+/* Make grid responsive for very long content */
+@media (max-width: 500px) {
+  .info-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .info-item {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0; /* Allow items to shrink */
 }
 
 .info-label {
@@ -263,6 +273,11 @@ body {
   font-size: 13px;
   color: #1f2937;
   font-weight: 500;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  hyphens: auto;
+  max-width: 100%;
+  line-height: 1.4;
 }
 
 .mbox-list {
@@ -278,6 +293,11 @@ body {
   border-radius: 12px;
   font-size: 11px;
   font-weight: 600;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  hyphens: auto;
+  max-width: 100%;
+  display: inline-block;
 }
 
 .modification-summary {
@@ -611,6 +631,152 @@ body {
   font-size: 12px;
 }
 
+/* Report Error Section Styles */
+.report-error-section {
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 20px;
+  border-left: 4px solid #3b82f6;
+  margin-top: 30px;
+}
+
+.report-error-section h4 {
+  color: #1e40af;
+  margin-bottom: 8px;
+  font-size: 16px;
+}
+
+.report-error-section p {
+  color: #6b7280;
+  margin-bottom: 16px;
+  font-size: 14px;
+}
+
+.error-report-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+#errorReportText {
+  width: 100%;
+  padding: 12px;
+  border: 2px solid #e5e7eb;
+  border-radius: 6px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  resize: vertical;
+  min-height: 80px;
+  transition: border-color 0.2s;
+}
+
+#errorReportText:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+#errorReportText::placeholder {
+  color: #9ca3af;
+}
+
+.report-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+#submitErrorReport {
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.2);
+}
+
+#submitErrorReport:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(59, 130, 246, 0.3);
+}
+
+#submitErrorReport:disabled {
+  background: #9ca3af;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.report-status {
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 0;
+  transition: all 0.2s;
+}
+
+.report-status.success {
+  color: #059669;
+}
+
+.report-status.error {
+  color: #dc2626;
+}
+
+.report-status.sending {
+  color: #3b82f6;
+}
+
+/* Activities Controls - only shown on activities tab */
+.activities-controls {
+  padding: 16px;
+  background: #f8fafc;
+  border-top: 1px solid #e5e7eb;
+  margin-top: auto;
+}
+
+.activities-controls .controls {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.activities-controls .btn {
+  padding: 12px 20px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+}
+
+.activities-controls .btn-primary {
+  background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+  color: white;
+  box-shadow: 0 2px 4px rgba(220, 38, 38, 0.2);
+}
+
+.activities-controls .btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(220, 38, 38, 0.3);
+}
+
+.activities-controls .btn-secondary {
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
+}
+
+.activities-controls .btn-secondary:hover {
+  background: #e5e7eb;
+  transform: translateY(-1px);
+}
+
 /* Activity Controls - Always Visible */
 .activity-controls {
   display: flex;
@@ -695,54 +861,8 @@ body {
 .activity-content {
   flex: 1;
   text-align: left;
-}
-
-/* Footer Styles */
-.footer {
-  padding: 16px;
-  background: #f8fafc;
-  border-top: 1px solid #e5e7eb;
-  margin-top: auto;
-}
-
-.controls {
-  display: flex;
-  justify-content: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-/* Footer Button Styles */
-.footer .btn {
-  padding: 12px 20px;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-  border: none;
-}
-
-.footer .btn-primary {
-  background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
-  color: white;
-  box-shadow: 0 2px 4px rgba(220, 38, 38, 0.2);
-}
-
-.footer .btn-primary:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(220, 38, 38, 0.3);
-}
-
-.footer .btn-secondary {
-  background: #f3f4f6;
-  color: #374151;
-  border: 1px solid #d1d5db;
-}
-
-.footer .btn-secondary:hover {
-  background: #e5e7eb;
-  transform: translateY(-1px);
+  min-width: 0; /* Allow content to shrink */
+  padding-right: 12px;
 }
 
 .activity-name {
@@ -750,18 +870,34 @@ body {
   font-size: 14px;
   color: #1f2937;
   margin-bottom: 4px;
-  line-height: 1.3;
+  line-height: 1.4;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  hyphens: auto;
+  max-width: 100%;
+}
+
+/* For extremely long activity names, add a fallback with ellipsis after 3 lines */
+.activity-name {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .activity-experience {
   font-size: 12px;
   color: #6b7280;
   margin-bottom: 2px;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
 }
 
 .activity-id {
   font-size: 11px;
   color: #9ca3af;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
 }
 
 .activity-badges {
@@ -769,6 +905,8 @@ body {
   flex-direction: column;
   gap: 4px;
   align-items: flex-end;
+  flex-shrink: 0; /* Prevent badges from shrinking */
+  margin-top: 2px;
 }
 
 .call-type-badge {
@@ -1503,6 +1641,11 @@ body {
   border-radius: 4px;
   font-size: 12px;
   font-weight: 500;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  hyphens: auto;
+  max-width: 100%;
+  display: inline-block;
 }
 
 .modification-item {
@@ -1628,6 +1771,8 @@ body {
   border-radius: 8px;
   border: 1px solid #d1d5db;
   box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  min-width: 0; /* Allow container to shrink */
+  overflow: hidden; /* Prevent content overflow */
 }
 
 .activity-selector h3 {
@@ -1650,12 +1795,24 @@ body {
   color: #333;
   cursor: pointer;
   transition: all 0.2s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .activity-selector select:focus {
   border-color: #dc2626;
   outline: none;
   box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.1);
+}
+
+/* Handle long text in dropdown options */
+.activity-selector select option {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .url-text {

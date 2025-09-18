@@ -8,14 +8,9 @@ class TargetPopup {
 
   async init() {
     try {
-      // Test connection to background script
-      const connectionTest = await chrome.runtime.sendMessage({ type: 'TEST_CONNECTION' });
-      console.log('🔗 DEBUGGER-POPUP: Connection test result:', connectionTest);
-      
       // Get current tab
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       this.currentTabId = tab.id;
-      console.log('📍 DEBUGGER-POPUP: Current tab ID:', this.currentTabId);
       
       // Bind events first
       this.bindEvents();
@@ -33,7 +28,6 @@ class TargetPopup {
       this.updateUI();
       
     } catch (error) {
-      console.error('❌ DEBUGGER-POPUP: Error initializing popup:', error);
       this.showError('Failed to initialize extension');
     }
   }
@@ -44,9 +38,8 @@ class TargetPopup {
         type: 'START_MONITORING',
         tabId: this.currentTabId 
       });
-      console.log('✅ DEBUGGER-POPUP: Monitoring started:', response);
     } catch (error) {
-      console.error('❌ DEBUGGER-POPUP: Error starting monitoring:', error);
+      console.error('Error starting monitoring:', error);
     }
   }
 
@@ -59,7 +52,6 @@ class TargetPopup {
       
       if (response && response.activities) {
         this.activities = response.activities;
-        console.log(`✅ DEBUGGER-POPUP: Found ${this.activities.length} activities`);
       } else {
         this.activities = [];
       }
@@ -73,7 +65,6 @@ class TargetPopup {
       }
       
     } catch (error) {
-      console.error('❌ DEBUGGER-POPUP: Error loading activities:', error);
       this.activities = [];
       this.updateActivityList();
     }
@@ -82,101 +73,204 @@ class TargetPopup {
   bindEvents() {
     // Tab switching
     document.querySelectorAll('.tab-button').forEach(button => {
-      button.onclick = (e) => {
+      button.addEventListener('click', (e) => {
         this.switchTab(e.target.dataset.tab);
-      };
+      });
     });
 
-    // Clear activities
+    // Clear activities button
     const clearBtn = document.getElementById('clearActivities');
     if (clearBtn) {
-      clearBtn.onclick = async () => {
-        // Switch to activities tab first
-        this.switchTab('activities');
+      clearBtn.addEventListener('click', async () => {
+        // Provide immediate visual feedback
+        const originalText = clearBtn.textContent;
         
-        await chrome.runtime.sendMessage({ 
-          type: 'CLEAR_ACTIVITIES',
-          tabId: this.currentTabId 
-        });
-        this.activities = [];
-        this.selectedActivityId = null;
-        this.updateUI();
-      };
+        clearBtn.textContent = '🧹 Clearing...';
+        clearBtn.disabled = true;
+        clearBtn.style.opacity = '0.7';
+        
+        try {
+          this.switchTab('activities');
+          
+          await chrome.runtime.sendMessage({ 
+            type: 'CLEAR_ACTIVITIES',
+            tabId: this.currentTabId 
+          });
+          
+          this.activities = [];
+          this.selectedActivityId = null;
+          this.updateUI();
+          
+          // Show brief success feedback
+          clearBtn.textContent = '✅ Cleared!';
+          
+          setTimeout(() => {
+            clearBtn.textContent = originalText;
+            clearBtn.disabled = false;
+            clearBtn.style.opacity = '1';
+          }, 1000);
+          
+        } catch (error) {
+          // Reset button if there's an error
+          clearBtn.textContent = originalText;
+          clearBtn.disabled = false;
+          clearBtn.style.opacity = '1';
+          console.error('Error clearing activities:', error);
+        }
+      });
     }
 
-    // Refresh activities
+    // Refresh activities button  
     const refreshBtn = document.getElementById('refreshActivities');
     if (refreshBtn) {
-      refreshBtn.onclick = async () => {
-        // Set flag to indicate we're after a reload
-        this.isAfterReload = true;
+      refreshBtn.addEventListener('click', async () => {
+        // Provide immediate visual feedback
+        const originalText = refreshBtn.textContent;
+        const originalDisabled = refreshBtn.disabled;
         
-        // Switch to activities tab first
-        this.switchTab('activities');
+        // Update button to show it's working
+        refreshBtn.textContent = '⏳ Reloading...';
+        refreshBtn.disabled = true;
+        refreshBtn.style.opacity = '0.7';
+        refreshBtn.style.cursor = 'not-allowed';
         
-        // Show loading immediately
-        this.showLoading();
-        this.activities = [];
-        this.selectedActivityId = null;
-        this.updateUI();
-        
-        // Clear existing activities
-        await chrome.runtime.sendMessage({ 
-          type: 'CLEAR_ACTIVITIES',
-          tabId: this.currentTabId 
-        });
-        
-        // Reload the page
-        await chrome.tabs.reload(this.currentTabId);
-        
-        // Start monitoring after page reload
-        setTimeout(async () => {
-          await this.startMonitoring();
+        try {
+          this.isAfterReload = true;
+          this.switchTab('activities');
           
-          // Keep checking for activities until they're loaded or timeout
-          this.waitForActivitiesAfterReload();
-        }, 2000);
-      };
+          // Show loading with specific message
+          this.showReloadingState('Preparing to reload page...');
+          
+          this.activities = [];
+          this.selectedActivityId = null;
+          this.updateUI();
+          
+          await chrome.runtime.sendMessage({ 
+            type: 'CLEAR_ACTIVITIES',
+            tabId: this.currentTabId 
+          });
+          
+          // Update status before reload
+          this.showReloadingState('Reloading page now...');
+          refreshBtn.textContent = '📄 Page Reloading...';
+          
+          await chrome.tabs.reload(this.currentTabId);
+          
+          // Update status after reload
+          refreshBtn.textContent = '🔍 Monitoring...';
+          this.showReloadingState('Page reloaded - starting monitoring...');
+          
+          setTimeout(async () => {
+            await this.startMonitoring();
+            this.waitForActivitiesAfterReload();
+          }, 2000);
+          
+          // Reset button after monitoring starts
+          setTimeout(() => {
+            refreshBtn.textContent = originalText;
+            refreshBtn.disabled = false;
+            refreshBtn.style.opacity = '1';
+            refreshBtn.style.cursor = 'pointer';
+          }, 3000);
+          
+        } catch (error) {
+          // Reset button if there's an error
+          refreshBtn.textContent = originalText;
+          refreshBtn.disabled = originalDisabled;
+          refreshBtn.style.opacity = '1';
+          refreshBtn.style.cursor = 'pointer';
+          console.error('Error during reload:', error);
+        }
+      });
     }
 
     // Excel download
     const downloadBtn = document.getElementById('copyAllActivities');
     if (downloadBtn) {
-      downloadBtn.onclick = () => {
+      downloadBtn.addEventListener('click', () => {
         this.downloadExcelReport();
-      };
+      });
+    }
+
+    // Error report submission
+    const submitErrorBtn = document.getElementById('submitErrorReport');
+    if (submitErrorBtn) {
+      submitErrorBtn.addEventListener('click', () => {
+        this.submitErrorReport();
+      });
     }
   }
 
   async waitForActivitiesAfterReload() {
     let attempts = 0;
-    const maxAttempts = 15; // 15 seconds max wait
+    const maxAttempts = 15;
+    
+    const loadingContainer = document.getElementById('loadingContainer');
+    const loadingText = loadingContainer?.querySelector('p');
+    const statusText = document.getElementById('statusText');
     
     const checkForActivities = async () => {
       attempts++;
-      console.log(`🔄 DEBUGGER-POPUP: Checking for activities (attempt ${attempts}/${maxAttempts})`);
+      
+      // Update progress message
+      const progressMessage = `Scanning for activities... (${attempts}/${maxAttempts})`;
+      if (loadingText) {
+        loadingText.textContent = progressMessage;
+      }
+      if (statusText) {
+        statusText.textContent = progressMessage;
+      }
       
       await this.loadActivities();
       
       if (this.activities.length > 0) {
-        console.log('✅ DEBUGGER-POPUP: Activities found after reload!');
-        this.hideLoading();
-        this.updateUI();
-        // Clear the reload flag after successful load
-        this.isAfterReload = false;
+        // Success - activities found!
+        const successMessage = `✅ Found ${this.activities.length} activities!`;
+        if (loadingText) {
+          loadingText.textContent = successMessage;
+        }
+        if (statusText) {
+          statusText.textContent = successMessage;
+        }
+        
+        // Brief delay to show success message
+        setTimeout(() => {
+          this.hideLoading();
+          this.updateUI();
+          this.isAfterReload = false;
+          
+          // Reset loading text for next time
+          if (loadingText) {
+            loadingText.textContent = 'Detecting Adobe Target activities...';
+          }
+        }, 1000);
         return;
       }
       
       if (attempts >= maxAttempts) {
-        console.log('⏰ DEBUGGER-POPUP: Timeout waiting for activities after reload');
-        this.hideLoading();
-        this.updateUI();
-        // Clear the reload flag after timeout
-        this.isAfterReload = false;
+        // Timeout - no activities found
+        const timeoutMessage = '⏰ Scan complete - no activities detected';
+        if (loadingText) {
+          loadingText.textContent = timeoutMessage;
+        }
+        if (statusText) {
+          statusText.textContent = timeoutMessage;
+        }
+        
+        setTimeout(() => {
+          this.hideLoading();
+          this.updateUI();
+          this.isAfterReload = false;
+          
+          // Reset loading text for next time
+          if (loadingText) {
+            loadingText.textContent = 'Detecting Adobe Target activities...';
+          }
+        }, 2000);
         return;
       }
       
-      // Check again in 1 second
+      // Continue checking
       setTimeout(checkForActivities, 1000);
     };
     
@@ -225,30 +319,22 @@ class TargetPopup {
 
       // Add click handlers
       activityList.querySelectorAll('.activity-item').forEach(item => {
-        item.onclick = () => {
+        item.addEventListener('click', () => {
           const activityId = item.dataset.activityId;
           this.selectActivity(activityId);
-        };
+        });
       });
     }
   }
 
   selectActivity(activityId) {
-    console.log('🎯 DEBUGGER-POPUP: Activity selected:', activityId);
-    console.log('🎯 DEBUGGER-POPUP: Total activities available:', this.activities.length);
-    
     this.selectedActivityId = activityId;
-    
-    // Find the selected activity
-    const selectedActivity = this.activities.find(a => a.id === activityId);
-    console.log('🎯 DEBUGGER-POPUP: Selected activity object:', selectedActivity);
     
     // Update visual selection
     document.querySelectorAll('.activity-item').forEach(item => {
       item.classList.toggle('selected', item.dataset.activityId === activityId);
     });
     
-    // Switch to details tab only if not currently on activities tab after reload
     if (!this.isAfterReload) {
       this.switchTab('details');
     }
@@ -278,40 +364,27 @@ class TargetPopup {
       selector.value = this.selectedActivityId;
     }
 
-    selector.onchange = (e) => {
+    selector.addEventListener('change', (e) => {
       this.selectActivity(e.target.value);
-    };
+    });
 
     this.updateDetailsView();
   }
 
   updateDetailsView() {
-    console.log('📊 DEBUGGER-POPUP: Updating details view');
-    console.log('📊 DEBUGGER-POPUP: Selected activity ID:', this.selectedActivityId);
-    console.log('📊 DEBUGGER-POPUP: Available activities:', this.activities.map(a => a.id));
-    
     const detailsContent = document.getElementById('detailsContent');
-    if (!detailsContent) {
-      console.error('❌ DEBUGGER-POPUP: detailsContent element not found!');
-      return;
-    }
+    if (!detailsContent) return;
 
     if (!this.selectedActivityId) {
-      console.log('📊 DEBUGGER-POPUP: No activity selected');
       detailsContent.innerHTML = '<p class="no-selection">Select an activity to view details</p>';
       return;
     }
 
     const activity = this.activities.find(a => a.id === this.selectedActivityId);
     if (!activity) {
-      console.error('❌ DEBUGGER-POPUP: Activity not found with ID:', this.selectedActivityId);
       detailsContent.innerHTML = '<p class="no-selection">Activity not found</p>';
       return;
     }
-
-    console.log('📊 DEBUGGER-POPUP: Found activity for details:', activity.name);
-    console.log('📊 DEBUGGER-POPUP: Activity details object:', activity.details);
-    console.log('📊 DEBUGGER-POPUP: Activity response tokens:', activity.details?.responseTokens);
 
     detailsContent.innerHTML = `
       <div class="activity-selector">
@@ -433,17 +506,17 @@ class TargetPopup {
     // Re-bind dropdown
     const newSelector = document.getElementById('activitySelector');
     if (newSelector) {
-      newSelector.onchange = (e) => {
+      newSelector.addEventListener('change', (e) => {
         this.selectActivity(e.target.value);
-      };
+      });
     }
 
     // Bind detail tab switching
     document.querySelectorAll('.detail-tab-btn').forEach(btn => {
-      btn.onclick = (e) => {
+      btn.addEventListener('click', (e) => {
         const tabName = e.target.dataset.tab;
         this.switchDetailTab(tabName);
-      };
+      });
     });
   }
 
@@ -459,42 +532,18 @@ class TargetPopup {
     });
   }
 
-  formatMboxInfoSimple(mboxes) {
-    if (!mboxes || mboxes.length === 0) {
-      return '<div class="no-data">No mbox information available</div>';
-    }
-    return mboxes.map(mbox => `
-      <div class="mbox-tag">${this.escapeHtml(mbox)}</div>
-    `).join('');
-  }
-
-  formatPageModificationsPreview(modifications) {
-    if (!modifications || modifications.length === 0) {
-      return '<div class="no-data">No content changes detected</div>';
-    }
-    
-    return modifications.slice(0, 3).map(mod => `
-      <div class="modification-item">
-        <span class="modification-type">${mod.type || 'Content Change'}</span>
-        <span class="modification-selector">${mod.selector || 'Page Element'}</span>
-      </div>
-    `).join('') + (modifications.length > 3 ? `<div class="more-modifications">+${modifications.length - 3} more</div>` : '');
-  }
-
   formatJsonViewer(data, type) {
     if (!data) {
       return '<div class="no-data">No data available</div>';
     }
 
     try {
-      // Parse data if it's a string
       const jsonData = typeof data === 'string' ? JSON.parse(data) : data;
       
       return `
         <div class="json-table-container">
           <div class="json-table-header">
             <span class="json-table-title">${type === 'request' ? 'Request' : 'Response'} Data</span>
-            <button class="copy-json-btn" onclick="popup.copyJsonData('${type}', this)" title="Copy JSON">📋</button>
           </div>
           <div class="json-table">
             ${this.formatJsonAsTable(jsonData, '')}
@@ -587,323 +636,21 @@ class TargetPopup {
     `;
   }
 
-  copyJsonData(type, button) {
-    // Find the activity data to copy the original JSON
-    const activity = this.activities.find(a => a.id === this.selectedActivityId);
-    if (!activity) return;
-    
-    let dataToCopy = '';
-    if (type === 'request' && activity.requestDetails?.payload) {
-      dataToCopy = JSON.stringify(activity.requestDetails.payload, null, 2);
-    } else if (type === 'response' && activity.responseDetails) {
-      dataToCopy = JSON.stringify(activity.responseDetails, null, 2);
-    }
-    
-    if (!dataToCopy) {
-      button.textContent = '❌';
-      setTimeout(() => {
-        button.textContent = '📋';
-      }, 1000);
-      return;
-    }
-    
-    navigator.clipboard.writeText(dataToCopy).then(() => {
-      const originalText = button.textContent;
-      button.textContent = '✅';
-      setTimeout(() => {
-        button.textContent = originalText;
-      }, 1000);
-    }).catch(err => {
-      console.error('Failed to copy JSON:', err);
-      button.textContent = '❌';
-      setTimeout(() => {
-        button.textContent = '📋';
-      }, 1000);
-    });
-  }
-
-  formatMboxInfo(mboxes) {
-    if (!mboxes || mboxes.length === 0) {
-      return '<p class="no-data">No mbox information available</p>';
-    }
-    return mboxes.map(mbox => `
-      <div class="mbox-item">
-        <span class="mbox-name">${this.escapeHtml(mbox)}</span>
-        <span class="mbox-description">Target location where content is delivered</span>
-      </div>
-    `).join('');
-  }
-
-  formatResponseTokensReadable(tokens) {
-    if (!tokens || Object.keys(tokens).length === 0) {
-      return '<p class="no-data">No targeting data available</p>';
-    }
-    
-    const categories = {
-      activity: [],
-      experience: [],
-      user: [],
-      geo: [],
-      profile: [],
-      other: []
-    };
-    
-    Object.entries(tokens).forEach(([key, value]) => {
-      const item = { key, value: String(value) };
-      if (key.includes('activity')) categories.activity.push(item);
-      else if (key.includes('experience')) categories.experience.push(item);
-      else if (key.includes('user') || key.includes('profile')) categories.user.push(item);
-      else if (key.includes('geo')) categories.geo.push(item);
-      else if (key.includes('profile')) categories.profile.push(item);
-      else categories.other.push(item);
-    });
-
-    let html = '';
-    if (categories.activity.length > 0) {
-      html += '<div class="token-category"><h4>🎯 Activity Information</h4>';
-      html += categories.activity.map(item => `
-        <div class="token-item">
-          <span class="token-label">${this.formatTokenLabel(item.key)}:</span>
-          <span class="token-value">${this.escapeHtml(item.value)}</span>
-        </div>
-      `).join('');
-      html += '</div>';
-    }
-    
-    if (categories.experience.length > 0) {
-      html += '<div class="token-category"><h4>🎨 Experience Details</h4>';
-      html += categories.experience.map(item => `
-        <div class="token-item">
-          <span class="token-label">${this.formatTokenLabel(item.key)}:</span>
-          <span class="token-value">${this.escapeHtml(item.value)}</span>
-        </div>
-      `).join('');
-      html += '</div>';
-    }
-    
-    if (categories.geo.length > 0) {
-      html += '<div class="token-category"><h4>🌍 Location Information</h4>';
-      html += categories.geo.map(item => `
-        <div class="token-item">
-          <span class="token-label">${this.formatTokenLabel(item.key)}:</span>
-          <span class="token-value">${this.escapeHtml(item.value)}</span>
-        </div>
-      `).join('');
-      html += '</div>';
-    }
-    
-    if (categories.user.length > 0 || categories.profile.length > 0) {
-      html += '<div class="token-category"><h4>👤 User Profile</h4>';
-      html += [...categories.user, ...categories.profile].map(item => `
-        <div class="token-item">
-          <span class="token-label">${this.formatTokenLabel(item.key)}:</span>
-          <span class="token-value">${this.escapeHtml(item.value)}</span>
-        </div>
-      `).join('');
-      html += '</div>';
-    }
-    
-    if (categories.other.length > 0) {
-      html += '<div class="token-category"><h4>📋 Other Data</h4>';
-      html += categories.other.map(item => `
-        <div class="token-item">
-          <span class="token-label">${this.formatTokenLabel(item.key)}:</span>
-          <span class="token-value">${this.escapeHtml(item.value)}</span>
-        </div>
-      `).join('');
-      html += '</div>';
-    }
-    
-    return html || '<p class="no-data">No targeting data available</p>';
-  }
-
-  formatTokenLabel(key) {
-    return key.replace(/\./g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/\b\w/g, l => l.toUpperCase());
-  }
-
-  formatRequestDetailsReadable(requestDetails) {
-    if (!requestDetails) {
-      return '<p class="no-data">No request information available</p>';
-    }
-    
-    return `
-      <div class="request-item">
-        <h4>🌐 Request URL</h4>
-        <div class="url-display">${this.escapeHtml(requestDetails.url || 'Not available')}</div>
-      </div>
-      <div class="request-item">
-        <h4>📨 Method</h4>
-        <span class="method-badge">${requestDetails.method || 'Unknown'}</span>
-      </div>
-      <div class="request-item">
-        <h4>📋 Request Parameters</h4>
-        <div class="json-display">
-          ${requestDetails.payload ? this.formatObjectReadable(requestDetails.payload) : '<p class="no-data">No parameters sent</p>'}
-        </div>
-      </div>
-    `;
-  }
-
-  formatResponseBodyReadable(responseDetails) {
-    if (!responseDetails) {
-      return '<p class="no-data">No response body available</p>';
-    }
-    
-    let html = `
-      <div class="response-item">
-        <h4>📊 Response Status</h4>
-        <span class="status-badge status-${responseDetails.statusCode}">${responseDetails.statusCode || 'Unknown'}</span>
-      </div>
-    `;
-    
-    if (responseDetails.mbox) {
-      html += `
-        <div class="response-item">
-          <h4>📦 Target Mbox</h4>
-          <span class="mbox-name">${this.escapeHtml(responseDetails.mbox)}</span>
-        </div>
-      `;
-    }
-    
-    if (responseDetails.option) {
-      html += `
-        <div class="response-item">
-          <h4>🎯 Delivered Content</h4>
-          <div class="json-display">
-            ${this.formatObjectReadable(responseDetails.option)}
-          </div>
-        </div>
-      `;
-    }
-    
-    if (responseDetails.handle) {
-      html += `
-        <div class="response-item">
-          <h4>🔄 Alloy.js Response Handle</h4>
-          <div class="json-display">
-            ${this.formatObjectReadable(responseDetails.handle)}
-          </div>
-        </div>
-      `;
-    }
-    
-    return html;
-  }
-
-  formatObjectReadable(obj) {
-    if (!obj) return '<p class="no-data">No data</p>';
-    
-    if (typeof obj === 'string') {
-      return `<div class="simple-value">${this.escapeHtml(obj)}</div>`;
-    }
-    
-    if (Array.isArray(obj)) {
-      if (obj.length === 0) return '<p class="no-data">Empty array</p>';
-      return obj.map((item, index) => `
-        <div class="array-item">
-          <strong>Item ${index + 1}:</strong>
-          ${this.formatObjectReadable(item)}
-        </div>
-      `).join('');
-    }
-    
-    const entries = Object.entries(obj);
-    if (entries.length === 0) return '<p class="no-data">No data</p>';
-    
-    return entries.map(([key, value]) => `
-      <div class="object-item">
-        <span class="object-key">${this.formatTokenLabel(key)}:</span>
-        <span class="object-value">${typeof value === 'object' ? JSON.stringify(value, null, 2) : this.escapeHtml(String(value))}</span>
-      </div>
-    `).join('');
-  }
-
-  formatResponseTokens(tokens) {
-    if (!tokens || Object.keys(tokens).length === 0) {
-      return '<p class="no-data">No response tokens available</p>';
-    }
-    return Object.entries(tokens).map(([key, value]) => `
-      <div class="json-item">
-        <span class="json-key">${this.escapeHtml(key)}:</span>
-        <span class="json-value">${this.escapeHtml(String(value))}</span>
-      </div>
-    `).join('');
-  }
-
-  formatPageModifications(modifications) {
-    if (!modifications || modifications.length === 0) {
-      return '<p class="no-data">No page modifications detected</p>';
-    }
-    return modifications.map(mod => `
-      <div class="modification-item">
-        <div class="mod-header">
-          <span class="mod-type">${mod.type}</span>
-          <span class="mod-selector">${mod.selector}</span>
-        </div>
-        <div class="mod-content">
-          <pre>${this.escapeHtml(mod.content || 'No content')}</pre>
-        </div>
-      </div>
-    `).join('');
-  }
-
-  formatRequestPayload(requestDetails) {
-    if (!requestDetails) {
-      return '<p class="no-data">No request details available</p>';
-    }
-    return `
-      <div class="json-item">
-        <span class="json-key">URL:</span>
-        <span class="json-value">${this.escapeHtml(requestDetails.url || '')}</span>
-      </div>
-      <div class="json-item">
-        <span class="json-key">Method:</span>
-        <span class="json-value">${requestDetails.method || ''}</span>
-      </div>
-      <div class="json-item">
-        <span class="json-key">Payload:</span>
-        <pre class="json-value">${JSON.stringify(requestDetails.payload || {}, null, 2)}</pre>
-      </div>
-    `;
-  }
-
   downloadExcelReport() {
     try {
       const data = this.activities.map(activity => {
-        // Flatten request payload for CSV columns
-        const requestPayload = activity.requestDetails?.payload || {};
-        const responsePayload = activity.responseDetails || {};
-        
-        // Create base activity data
-        const activityData = {
+        return {
           'Activity Name': activity.name || '',
           'Experience Name': activity.experience || '',
           'Activity ID': activity.activityId || '',
-          'Experience ID': activity.experienceId || '',
           'Implementation Type': activity.implementationType || '',
           'Call Type': activity.type || '',
           'Status Code': activity.statusCode || '',
           'Timestamp': new Date(activity.timestamp).toISOString(),
           'Request URL': activity.requestDetails?.url || '',
           'Request Method': activity.requestDetails?.method || '',
-          'Client Code': activity.details?.clientCode || '',
-          'Request ID': activity.details?.requestId || '',
-          'Mboxes': (activity.details?.mboxes || []).join('; '),
-          'Response Tokens': JSON.stringify(activity.details?.responseTokens || {}),
-          'Page Modifications': JSON.stringify(activity.details?.pageModifications || [])
+          'Response Tokens': JSON.stringify(activity.details?.responseTokens || {})
         };
-
-        // Add flattened request payload data
-        if (requestPayload && typeof requestPayload === 'object') {
-          this.flattenObject(requestPayload, 'Request_', activityData);
-        }
-
-        // Add flattened response payload data
-        if (responsePayload && typeof responsePayload === 'object') {
-          this.flattenObject(responsePayload, 'Response_', activityData);
-        }
-
-        return activityData;
       });
 
       const csv = this.convertToCSV(data);
@@ -911,30 +658,6 @@ class TargetPopup {
     } catch (error) {
       console.error('Error downloading report:', error);
     }
-  }
-
-  // Helper method to flatten nested objects for CSV
-  flattenObject(obj, prefix = '', result = {}, maxDepth = 3, currentDepth = 0) {
-    if (currentDepth >= maxDepth || !obj || typeof obj !== 'object') {
-      return result;
-    }
-
-    for (const [key, value] of Object.entries(obj)) {
-      const newKey = prefix + key.replace(/[^a-zA-Z0-9_]/g, '_');
-      
-      if (value === null || value === undefined) {
-        result[newKey] = '';
-      } else if (Array.isArray(value)) {
-        result[newKey] = JSON.stringify(value);
-      } else if (typeof value === 'object') {
-        // Recursively flatten nested objects
-        this.flattenObject(value, `${newKey}_`, result, maxDepth, currentDepth + 1);
-      } else {
-        result[newKey] = String(value);
-      }
-    }
-    
-    return result;
   }
 
   convertToCSV(data) {
@@ -974,12 +697,43 @@ class TargetPopup {
     
     if (loadingContainer) {
       loadingContainer.style.display = 'flex';
+      // Reset to default loading message
+      const loadingText = loadingContainer.querySelector('p');
+      if (loadingText) {
+        loadingText.textContent = 'Detecting Adobe Target activities...';
+      }
     }
     
-    // Hide other elements to show loading in empty area
     if (activityList) activityList.style.display = 'none';
     if (emptyState) emptyState.style.display = 'none';
     if (activityActions) activityActions.style.display = 'none';
+  }
+
+  showReloadingState(message) {
+    const loadingContainer = document.getElementById('loadingContainer');
+    const activityList = document.getElementById('activityList');
+    const emptyState = document.getElementById('emptyState');
+    const activityActions = document.getElementById('activityActions');
+    
+    // Show loading container with custom message
+    if (loadingContainer) {
+      loadingContainer.style.display = 'flex';
+      const loadingText = loadingContainer.querySelector('p');
+      if (loadingText) {
+        loadingText.textContent = message;
+      }
+    }
+    
+    // Hide other elements
+    if (activityList) activityList.style.display = 'none';
+    if (emptyState) emptyState.style.display = 'none';
+    if (activityActions) activityActions.style.display = 'none';
+    
+    // Update status text in header
+    const statusText = document.getElementById('statusText');
+    if (statusText) {
+      statusText.textContent = message;
+    }
   }
 
   hideLoading() {
@@ -1024,7 +778,97 @@ class TargetPopup {
   showError(message) {
     const statusText = document.getElementById('statusText');
     if (statusText) statusText.textContent = `Error: ${message}`;
-    console.error('Error:', message);
+  }
+
+  async submitErrorReport() {
+    const textarea = document.getElementById('errorReportText');
+    const submitBtn = document.getElementById('submitErrorReport');
+    const statusSpan = document.getElementById('reportStatus');
+    
+    const errorText = textarea?.value?.trim();
+    
+    if (!errorText) {
+      this.showReportStatus('Please describe the issue before submitting.', 'error');
+      return;
+    }
+    
+    if (submitBtn) submitBtn.disabled = true;
+    this.showReportStatus('Sending report...', 'sending');
+    
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const currentUrl = tab?.url || 'Unknown';
+      
+      const emailData = {
+        to: 'nishtha.venice@gmail.com',
+        subject: 'Adobe Target Inspector - Error Report',
+        body: `Error Report from Adobe Target Inspector Extension
+
+Website: ${currentUrl}
+Timestamp: ${new Date().toISOString()}
+User Agent: ${navigator.userAgent}
+Activities Detected: ${this.activities.length}
+
+Issue Description:
+${errorText}
+
+---
+This report was automatically generated by the Adobe Target Inspector Chrome Extension.`
+      };
+      
+      const mailtoUrl = `mailto:${encodeURIComponent(emailData.to)}` +
+                       `?subject=${encodeURIComponent(emailData.subject)}` +
+                       `&body=${encodeURIComponent(emailData.body)}`;
+      
+      await chrome.tabs.create({ url: mailtoUrl, active: false });
+      
+      if (textarea) textarea.value = '';
+      this.showReportStatus('✅ Email client opened! Please send the email to complete your report.', 'success');
+      
+    } catch (error) {
+      this.showReportStatus('❌ Failed to open email client. Please email nishtha.venice@gmail.com directly.', 'error');
+    } finally {
+      setTimeout(() => {
+        if (submitBtn) submitBtn.disabled = false;
+      }, 2000);
+    }
+  }
+  
+  showReportStatus(message, type) {
+    const statusSpan = document.getElementById('reportStatus');
+    if (!statusSpan) return;
+    
+    statusSpan.textContent = message;
+    statusSpan.className = `report-status ${type}`;
+    
+    if (type !== 'success') {
+      setTimeout(() => {
+        statusSpan.textContent = '';
+        statusSpan.className = 'report-status';
+      }, 5000);
+    }
+  }
+
+  formatMboxInfoSimple(mboxes) {
+    if (!mboxes || mboxes.length === 0) {
+      return '<div class="no-data">No mbox information available</div>';
+    }
+    return mboxes.map(mbox => `
+      <div class="mbox-tag">${this.escapeHtml(mbox)}</div>
+    `).join('');
+  }
+
+  formatPageModificationsPreview(modifications) {
+    if (!modifications || modifications.length === 0) {
+      return '<div class="no-data">No content changes detected</div>';
+    }
+    
+    return modifications.slice(0, 3).map(mod => `
+      <div class="modification-item">
+        <span class="modification-type">${mod.type || 'Content Change'}</span>
+        <span class="modification-selector">${mod.selector || 'Page Element'}</span>
+      </div>
+    `).join('') + (modifications.length > 3 ? `<div class="more-modifications">+${modifications.length - 3} more</div>` : '');
   }
 
   escapeHtml(text) {
