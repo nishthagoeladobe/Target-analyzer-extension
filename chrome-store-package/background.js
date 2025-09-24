@@ -147,7 +147,7 @@ class AdobeTargetDebugger {
       }
       
     } catch (error) {
-      console.error('❌ DEBUGGER: Invalid tab ID:', tabId, error.message);
+      console.log('ℹ️ DEBUGGER: Tab not accessible:', tabId, error.message);
       return;
     }
 
@@ -182,25 +182,28 @@ class AdobeTargetDebugger {
       console.log('🧹 DEBUGGER: Cleared pending requests for tab:', tabId);
 
     } catch (error) {
-      console.error('❌ DEBUGGER: Error attaching debugger:', error.message);
-      
-      // Handle specific error types
+      // Handle specific error types gracefully (these are expected in many scenarios)
       if (error.message.includes('already attached') || error.message.includes('Another debugger')) {
-        console.log('🔧 DEBUGGER: DevTools conflict detected');
-        // Don't create fallback for DevTools conflicts, just skip silently
-      } else if (error.message.includes('No tab with given id')) {
-        console.log('⚠️ DEBUGGER: Tab no longer exists:', tabId);
+        console.log('ℹ️ DEBUGGER: DevTools is open - extension will work with limited data');
+        // This is normal when DevTools is open, don't log as error
+      } else if (error.message.includes('No tab with given id') || error.message.includes('Invalid tab ID')) {
+        console.log('ℹ️ DEBUGGER: Tab closed before debugger could attach');
+        // This is normal when tabs are closed quickly
       } else if (error.message.includes('extensions gallery cannot be scripted') || 
                  error.message.includes('Cannot attach to') ||
-                 error.message.includes('Cannot access')) {
-        console.log('⚠️ DEBUGGER: Protected page - debugger access not allowed');
-        // This is normal for system pages, don't create fallback activities
+                 error.message.includes('Cannot access') ||
+                 error.message.includes('chrome://') ||
+                 error.message.includes('chrome-extension://')) {
+        console.log('ℹ️ DEBUGGER: Protected/system page - debugger not allowed (normal)');
+        // This is normal for Chrome system pages
       } else if (error.message.includes('Target closed') || 
-                 error.message.includes('Session does not exist')) {
-        console.log('⚠️ DEBUGGER: Tab or session no longer available');
+                 error.message.includes('Session does not exist') ||
+                 error.message.includes('Detached while handling command')) {
+        console.log('ℹ️ DEBUGGER: Tab/session closed during operation (normal)');
+        // This is normal when tabs are navigated or closed
       } else {
-        console.log('🔧 DEBUGGER: Unexpected error, but continuing silently:', error.message);
-        // Don't create fallback activities for unknown errors as they can cause confusion
+        // Only log unexpected errors, but don't make them look alarming
+        console.log('ℹ️ DEBUGGER: Debugger attachment skipped:', error.message);
       }
       
       this.debuggingSessions.delete(tabId);
@@ -394,7 +397,7 @@ class AdobeTargetDebugger {
         // Create basic activity without response body
         this.createBasicActivity(tabId, pendingRequest);
       } else {
-        console.error('❌ DEBUGGER: Unexpected error:', error);
+        console.log('ℹ️ DEBUGGER: Unexpected error (continuing):', error.message);
         // Create basic activity as fallback
         this.createBasicActivity(tabId, pendingRequest);
       }
@@ -445,7 +448,7 @@ class AdobeTargetDebugger {
       }
       
     } catch (error) {
-      console.error('❌ DEBUGGER: Error parsing at.js response:', error);
+      console.log('ℹ️ DEBUGGER: Could not parse at.js response (using fallback):', error.message);
       this.createBasicActivity(tabId, requestInfo);
     }
   }
@@ -569,7 +572,7 @@ class AdobeTargetDebugger {
       }
       
     } catch (error) {
-      console.error('❌ DEBUGGER: Error parsing alloy.js response:', error);
+      console.log('ℹ️ DEBUGGER: Could not parse alloy.js response (using fallback):', error.message);
       this.createBasicActivity(tabId, requestInfo);
     }
   }

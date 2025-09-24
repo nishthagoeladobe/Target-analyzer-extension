@@ -1,17 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Adobe Target Activity Inspector",
-  "version": "1.0.0",
-  "description": "Detect and understand Adobe Target activities (at.js & Alloy.js) with real activity names, response tokens, and non-technical explanations.",
+  "version": "1.0.2",
+  "description": "Detect and understand Adobe Target activities (at.js & Alloy.js) with real activity names and response tokens.",
   "author": "Adobe Target Community",
   "permissions": [
     "activeTab",
     "storage",
     "debugger",
     "tabs"
-  ],
-  "host_permissions": [
-    "<all_urls>"
   ],
   "background": {
     "service_worker": "background.js"
