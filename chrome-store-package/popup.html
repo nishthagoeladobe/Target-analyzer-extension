@@ -43,7 +43,7 @@
 
         <div class="activity-actions" id="activityActions" style="display: none;">
           <button class="btn-secondary copy-all-btn" id="copyAllActivities">
-            📊 Download Excel Report
+            📊 Download Complete Report (CSV)
           </button>
         </div>
 
@@ -57,6 +57,9 @@
             <div class="empty-icon">🎯</div>
             <h3>No Adobe Target activities detected</h3>
             <p>Browse the website to see personalization and testing activities.</p>
+            <div class="debugger-notice" style="margin-top: 12px; padding: 8px 12px; background: #f0f9ff; border-radius: 6px; font-size: 12px; color: #0369a1;">
+              ℹ️ <strong>Note:</strong> Chrome may show a "debugging" notification - this is normal and allows the extension to detect Adobe Target activities.
+            </div>
           </div>
         </div>
 
@@ -64,7 +67,7 @@
         <div class="activities-controls">
           <div class="controls">
             <button id="clearActivities" class="btn btn-secondary">Clear Activities</button>
-            <button id="refreshActivities" class="btn btn-primary">🔄 Reload Page</button>
+            <button id="refreshActivities" class="btn btn-primary">🔍 Start Monitoring & Reload</button>
           </div>
         </div>
       </div>

@@ -36,8 +36,7 @@ A Chrome extension that detects and explains Adobe Target activities on websites
 
 - **debugger**: Required to read network response bodies for accurate activity names
 - **activeTab**: Only works on the current tab you're viewing
-- **storage**: Saves detected activities locally in your browser
-- **tabs**: Allows page reload functionality
+- **tabs**: Allows page reload functionality for activity detection
 
 **🛡️ Privacy Guarantee**: No data is sent to external servers - everything stays in your browser.
 

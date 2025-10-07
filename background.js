@@ -3,6 +3,8 @@ class AdobeTargetDebugger {
     this.activities = new Map(); // tabId -> activities array
     this.debuggingSessions = new Map(); // tabId -> boolean
     this.pendingRequests = new Map(); // requestId -> request info
+    this.debuggerCancelledTabs = new Map(); // tabId -> timestamp when user cancelled debugger
+    this.autoDebuggerDisabled = new Set(); // tabs where auto-debugger was disabled by user action
     
     this.init();
   }
@@ -38,31 +40,30 @@ class AdobeTargetDebugger {
       this.handleDebuggerEvent(source.tabId, method, params);
     });
 
-    // Clear activities when tab navigates and start debugging on complete
+    // Only clear activities when tab navigates - NO automatic debugging
     chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
       if (changeInfo.status === 'loading') {
         console.log('🔄 DEBUGGER: Tab loading, clearing activities:', tabId);
         this.clearTabActivities(tabId);
+        // Clear cancelled status on navigation to new page (fresh start)
+        this.debuggerCancelledTabs.delete(tabId);
+        this.autoDebuggerDisabled.delete(tabId);
       }
-      if (changeInfo.status === 'complete' && tab?.url) {
-        // Check if the tab URL is debuggable before attempting to start debugging
-        if (!this.isTabDebuggable(tab.url)) {
-          console.log('🔄 DEBUGGER: Skipping auto-debugging for system/protected page:', tab.url.substring(0, 50) + '...');
-          return;
-        }
-        
-        console.log('🔄 DEBUGGER: Tab complete, starting debugging with delay:', tabId);
-        // Small delay to ensure page is fully loaded
-        setTimeout(() => {
-          this.startDebugging(tabId);
-        }, 1000);
-      }
+      // REMOVED: No automatic debugger attachment on page complete
+      // Debugger will only be attached when user explicitly requests it
     });
 
     // Handle debugger detachment
     chrome.debugger.onDetach.addListener((source, reason) => {
       console.log('🔌 DEBUGGER: Debugger detached from tab:', source.tabId, 'Reason:', reason);
       this.debuggingSessions.delete(source.tabId);
+      
+      // If user cancelled, track it to avoid re-attempting immediately
+      if (reason === 'canceled_by_user') {
+        console.log('👤 DEBUGGER: User cancelled debugger for tab:', source.tabId);
+        this.debuggerCancelledTabs.set(source.tabId, Date.now());
+        this.autoDebuggerDisabled.add(source.tabId);
+      }
     });
 
     // Handle tab removal to clean up resources
@@ -70,6 +71,8 @@ class AdobeTargetDebugger {
       console.log('🗑️ DEBUGGER: Tab removed, cleaning up:', tabId);
       this.activities.delete(tabId);
       this.debuggingSessions.delete(tabId);
+      this.debuggerCancelledTabs.delete(tabId);
+      this.autoDebuggerDisabled.delete(tabId);
       
       // Clear pending requests for this tab
       this.pendingRequests.forEach((request, requestId) => {
@@ -89,15 +92,29 @@ class AdobeTargetDebugger {
     switch (message.type) {
       case 'START_MONITORING':
         console.log('🎯 DEBUGGER: Starting monitoring for tab:', tabId);
-        await this.startDebugging(tabId);
+        await this.startDebugging(tabId, 'manual');
         sendResponse({ success: true, method: 'debugger' });
+        break;
+
+      case 'ENABLE_AUTO_DEBUGGING':
+        console.log('🎯 DEBUGGER: Re-enabling auto-debugging for tab:', tabId);
+        this.autoDebuggerDisabled.delete(tabId);
+        this.debuggerCancelledTabs.delete(tabId);
+        await this.startDebugging(tabId, 'manual');
+        sendResponse({ success: true, enabled: true });
         break;
 
       case 'GET_ACTIVITIES':
         console.log('📋 DEBUGGER: Getting activities for tab:', tabId);
         const activities = this.activities.get(tabId) || [];
+        const isDebugging = this.debuggingSessions.has(tabId);
+        const isDisabled = this.autoDebuggerDisabled.has(tabId);
         console.log(`📊 DEBUGGER: Found ${activities.length} activities for tab:`, tabId);
-        sendResponse({ activities });
+        sendResponse({ 
+          activities, 
+          isDebugging, 
+          debuggerDisabled: isDisabled 
+        });
         break;
 
       case 'CLEAR_ACTIVITIES':
@@ -124,12 +141,18 @@ class AdobeTargetDebugger {
     }
   }
 
-  async startDebugging(tabId) {
-    console.log('🔧 DEBUGGER: Starting debugging session for tab:', tabId);
+  async startDebugging(tabId, trigger = 'auto') {
+    console.log('🔧 DEBUGGER: Starting debugging session for tab:', tabId, 'trigger:', trigger);
     
     // Skip if already debugging this tab
     if (this.debuggingSessions.has(tabId)) {
       console.log('⚠️ DEBUGGER: Already debugging tab:', tabId);
+      return;
+    }
+
+    // If this is auto-trigger and user has cancelled before, skip
+    if (trigger === 'auto' && this.autoDebuggerDisabled.has(tabId)) {
+      console.log('⚠️ DEBUGGER: Auto-debugging disabled for tab:', tabId);
       return;
     }
 
@@ -201,9 +224,22 @@ class AdobeTargetDebugger {
                  error.message.includes('Detached while handling command')) {
         console.log('ℹ️ DEBUGGER: Tab/session closed during operation (normal)');
         // This is normal when tabs are navigated or closed
+      } else if (error.message.includes('canceled') || error.message.includes('Canceled') || error.message.includes('cancelled')) {
+        console.log('👤 DEBUGGER: User cancelled debugger attachment for tab:', tabId);
+        // Mark this tab so we don't keep trying automatically
+        this.debuggerCancelledTabs.set(tabId, Date.now());
+        if (trigger === 'auto') {
+          this.autoDebuggerDisabled.add(tabId);
+          console.log('🔕 DEBUGGER: Auto-debugging disabled for tab:', tabId);
+        }
       } else {
         // Only log unexpected errors, but don't make them look alarming
         console.log('ℹ️ DEBUGGER: Debugger attachment skipped:', error.message);
+        // For auto-triggered debugging, be more conservative with retries
+        if (trigger === 'auto') {
+          this.debuggerCancelledTabs.set(tabId, Date.now());
+          console.log('⏸️ DEBUGGER: Auto-debugging paused for tab due to error:', tabId);
+        }
       }
       
       this.debuggingSessions.delete(tabId);
@@ -274,7 +310,9 @@ class AdobeTargetDebugger {
     const url = params.request.url;
     
     // Check if this is an Adobe Target call (at.js delivery or alloy.js interact)
-    const isDeliveryCall = url.includes('tt.omtrdc.net/rest/v1/delivery');
+    // Support both standard tt.omtrdc.net and CNAME implementations
+    const isDeliveryCall = url.includes('tt.omtrdc.net/rest/v1/delivery') || 
+                          (url.includes('/rest/v1/delivery') && url.includes('client='));
     const isInteractCall = url.includes('/ee/or2/v1/interact') || 
                           url.includes('/ee/v1/interact') || 
                           url.includes('aem.playstation.com/ee/');
@@ -290,7 +328,12 @@ class AdobeTargetDebugger {
     });
 
     if (isDeliveryCall || isInteractCall) {
-      console.log('🎯 DEBUGGER: Adobe Target call detected:', url);
+      const detectionType = url.includes('tt.omtrdc.net') ? 'standard' : 'CNAME';
+      console.log('🎯 DEBUGGER: Adobe Target call detected:', {
+        url: url.substring(0, 100) + (url.length > 100 ? '...' : ''),
+        type: isDeliveryCall ? 'delivery' : 'interact',
+        detection: detectionType
+      });
       
       // Store request info for later processing
       console.log('🔍 DEBUGGER: Storing request with POST data:', {

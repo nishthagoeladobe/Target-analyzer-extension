@@ -15,17 +15,21 @@ class TargetPopup {
       // Bind events first
       this.bindEvents();
       
-      // Show loading initially
-      this.showLoading();
+      // Check if already monitoring this tab (from previous session)
+      const response = await chrome.runtime.sendMessage({ 
+        type: 'GET_ACTIVITIES',
+        tabId: this.currentTabId 
+      });
       
-      // Start monitoring
-      await this.startMonitoring();
-      
-      // Load activities
-      await this.loadActivities();
-      
-      // Update UI
-      this.updateUI();
+      if (response && response.activities && response.activities.length > 0) {
+        // Already have activities from previous monitoring
+        this.activities = response.activities;
+        this.isDebugging = response.isDebugging;
+        this.updateUI();
+      } else {
+        // Show manual monitoring option - no automatic debugger attachment
+        this.showManualMonitoringState();
+      }
       
     } catch (error) {
       this.showError('Failed to initialize extension');
@@ -52,8 +56,12 @@ class TargetPopup {
       
       if (response && response.activities) {
         this.activities = response.activities;
+        this.isDebugging = response.isDebugging;
+        this.debuggerDisabled = response.debuggerDisabled;
       } else {
         this.activities = [];
+        this.isDebugging = false;
+        this.debuggerDisabled = false;
       }
       
       this.updateActivityList();
@@ -62,6 +70,11 @@ class TargetPopup {
       // Auto-select first activity if none selected and activities exist
       if (!this.selectedActivityId && this.activities.length > 0) {
         this.selectActivity(this.activities[0].id);
+      }
+      
+      // Show appropriate state based on debugging status
+      if (this.debuggerDisabled && this.activities.length === 0) {
+        this.showDebuggerDisabledState();
       }
       
     } catch (error) {
@@ -90,16 +103,16 @@ class TargetPopup {
         clearBtn.style.opacity = '0.7';
         
         try {
-          this.switchTab('activities');
+        this.switchTab('activities');
+        
+        await chrome.runtime.sendMessage({ 
+          type: 'CLEAR_ACTIVITIES',
+          tabId: this.currentTabId 
+        });
           
-          await chrome.runtime.sendMessage({ 
-            type: 'CLEAR_ACTIVITIES',
-            tabId: this.currentTabId 
-          });
-          
-          this.activities = [];
-          this.selectedActivityId = null;
-          this.updateUI();
+        this.activities = [];
+        this.selectedActivityId = null;
+        this.updateUI();
           
           // Show brief success feedback
           clearBtn.textContent = '✅ Cleared!';
@@ -120,7 +133,7 @@ class TargetPopup {
       });
     }
 
-    // Refresh activities button  
+    // Refresh activities button - ONLY way to start monitoring  
     const refreshBtn = document.getElementById('refreshActivities');
     if (refreshBtn) {
       refreshBtn.addEventListener('click', async () => {
@@ -129,7 +142,7 @@ class TargetPopup {
         const originalDisabled = refreshBtn.disabled;
         
         // Update button to show it's working
-        refreshBtn.textContent = '⏳ Reloading...';
+        refreshBtn.textContent = '⏳ Starting Monitoring...';
         refreshBtn.disabled = true;
         refreshBtn.style.opacity = '0.7';
         refreshBtn.style.cursor = 'not-allowed';
@@ -139,7 +152,7 @@ class TargetPopup {
           this.switchTab('activities');
           
           // Show loading with specific message
-          this.showReloadingState('Preparing to reload page...');
+          this.showReloadingState('Starting Adobe Target monitoring...');
           
           this.activities = [];
           this.selectedActivityId = null;
@@ -150,18 +163,23 @@ class TargetPopup {
             tabId: this.currentTabId 
           });
           
+          // Start monitoring FIRST (this is when debugger notification appears)
+          refreshBtn.textContent = '🔍 Enabling Debugger...';
+          this.showReloadingState('Enabling Adobe Target detection...');
+          
+          await this.startMonitoring();
+          
           // Update status before reload
-          this.showReloadingState('Reloading page now...');
-          refreshBtn.textContent = '📄 Page Reloading...';
+          this.showReloadingState('Reloading page to detect activities...');
+          refreshBtn.textContent = '📄 Reloading Page...';
           
           await chrome.tabs.reload(this.currentTabId);
           
           // Update status after reload
-          refreshBtn.textContent = '🔍 Monitoring...';
-          this.showReloadingState('Page reloaded - starting monitoring...');
+          refreshBtn.textContent = '🔍 Scanning for Activities...';
+          this.showReloadingState('Page reloaded - scanning for Adobe Target activities...');
           
           setTimeout(async () => {
-            await this.startMonitoring();
             this.waitForActivitiesAfterReload();
           }, 2000);
           
@@ -171,7 +189,7 @@ class TargetPopup {
             refreshBtn.disabled = false;
             refreshBtn.style.opacity = '1';
             refreshBtn.style.cursor = 'pointer';
-          }, 3000);
+          }, 5000);
           
         } catch (error) {
           // Reset button if there's an error
@@ -179,7 +197,7 @@ class TargetPopup {
           refreshBtn.disabled = originalDisabled;
           refreshBtn.style.opacity = '1';
           refreshBtn.style.cursor = 'pointer';
-          console.error('Error during reload:', error);
+          console.error('Error during monitoring setup:', error);
         }
       });
     }
@@ -235,14 +253,14 @@ class TargetPopup {
         
         // Brief delay to show success message
         setTimeout(() => {
-          this.hideLoading();
-          this.updateUI();
-          this.isAfterReload = false;
+        this.hideLoading();
+        this.updateUI();
+        this.isAfterReload = false;
           
           // Reset loading text for next time
-          if (loadingText) {
-            loadingText.textContent = 'Detecting Adobe Target activities...';
-          }
+        if (loadingText) {
+          loadingText.textContent = 'Detecting Adobe Target activities...';
+        }
         }, 1000);
         return;
       }
@@ -258,14 +276,14 @@ class TargetPopup {
         }
         
         setTimeout(() => {
-          this.hideLoading();
-          this.updateUI();
-          this.isAfterReload = false;
+        this.hideLoading();
+        this.updateUI();
+        this.isAfterReload = false;
           
           // Reset loading text for next time
-          if (loadingText) {
-            loadingText.textContent = 'Detecting Adobe Target activities...';
-          }
+        if (loadingText) {
+          loadingText.textContent = 'Detecting Adobe Target activities...';
+        }
         }, 2000);
         return;
       }
@@ -286,6 +304,94 @@ class TargetPopup {
     });
   }
 
+  showManualMonitoringState() {
+    const activityList = document.getElementById('activityList');
+    const emptyState = document.getElementById('emptyState');
+    const activityActions = document.getElementById('activityActions');
+    const loadingContainer = document.getElementById('loadingContainer');
+    
+    // Hide other elements
+    if (loadingContainer) loadingContainer.style.display = 'none';
+    if (activityList) activityList.style.display = 'none';
+    if (activityActions) activityActions.style.display = 'none';
+    
+    // Show manual monitoring state
+    if (emptyState) {
+      emptyState.style.display = 'block';
+      emptyState.innerHTML = `
+        <div class="empty-icon">🎯</div>
+        <h3>Ready to detect Adobe Target activities</h3>
+        <p>Click <strong>"🔍 Start Monitoring & Reload"</strong> below to begin detecting Adobe Target activities on this page.</p>
+        <div style="margin-top: 16px; padding: 12px; background: #f0f9ff; border-radius: 8px; font-size: 13px; color: #0369a1;">
+          ℹ️ <strong>Note:</strong> Chrome will show a "debugging" notification when you click Start Monitoring. This happens ONLY when you choose to monitor - never automatically. It's safe to allow.
+        </div>
+      `;
+    }
+    
+    // Update status
+    const statusText = document.getElementById('statusText');
+    if (statusText) statusText.textContent = 'Ready to monitor - Click Start Monitoring & Reload';
+  }
+
+  showDebuggerDisabledState() {
+    const activityList = document.getElementById('activityList');
+    const emptyState = document.getElementById('emptyState');
+    const activityActions = document.getElementById('activityActions');
+    const loadingContainer = document.getElementById('loadingContainer');
+    
+    // Hide other elements
+    if (loadingContainer) loadingContainer.style.display = 'none';
+    if (activityList) activityList.style.display = 'none';
+    if (activityActions) activityActions.style.display = 'none';
+    
+    // Show disabled state with option to re-enable
+    if (emptyState) {
+      emptyState.style.display = 'block';
+      emptyState.innerHTML = `
+        <div class="empty-icon">🔕</div>
+        <h3>Adobe Target monitoring is paused</h3>
+        <p>You cancelled the Chrome debugger notification. This is totally fine!<br><br>
+        <strong>To detect Adobe Target activities:</strong><br>
+        Click "Enable Monitoring" below and accept the Chrome debugger notification.</p>
+        <div style="margin-top: 16px; padding: 12px; background: #f0f9ff; border-radius: 8px; font-size: 13px; color: #0369a1;">
+          ℹ️ <strong>Why the notification appears:</strong><br>
+          Chrome shows this for security when extensions monitor network traffic. It's safe to allow for Adobe Target detection.
+        </div>
+        <button id="enableDebuggingBtn" class="btn btn-primary" style="margin-top: 16px;">
+          ✅ Enable Monitoring
+        </button>
+      `;
+      
+      // Bind enable debugging button
+      const enableBtn = document.getElementById('enableDebuggingBtn');
+      if (enableBtn) {
+        enableBtn.onclick = async () => {
+          enableBtn.textContent = '⏳ Enabling...';
+          enableBtn.disabled = true;
+          
+          try {
+            await chrome.runtime.sendMessage({ 
+              type: 'ENABLE_AUTO_DEBUGGING',
+              tabId: this.currentTabId 
+            });
+            
+            this.showLoading();
+            await this.loadActivities();
+            this.updateUI();
+          } catch (error) {
+            console.error('Error enabling debugging:', error);
+            enableBtn.textContent = 'Enable Monitoring';
+            enableBtn.disabled = false;
+          }
+        };
+      }
+    }
+    
+    // Update status
+    const statusText = document.getElementById('statusText');
+    if (statusText) statusText.textContent = 'Monitoring paused - Click Enable to detect activities';
+  }
+
   updateActivityList() {
     const activityList = document.getElementById('activityList');
     const emptyState = document.getElementById('emptyState');
@@ -293,6 +399,13 @@ class TargetPopup {
     
     if (this.activities.length === 0) {
       if (activityList) activityList.innerHTML = '';
+      
+      // Check if we need to show debugger disabled state
+      if (this.debuggerDisabled) {
+        this.showDebuggerDisabledState();
+        return;
+      }
+      
       if (emptyState) emptyState.style.display = 'block';
       if (activityActions) activityActions.style.display = 'none';
       return;
@@ -638,25 +751,140 @@ class TargetPopup {
 
   downloadExcelReport() {
     try {
-      const data = this.activities.map(activity => {
-        return {
-          'Activity Name': activity.name || '',
-          'Experience Name': activity.experience || '',
-          'Activity ID': activity.activityId || '',
-          'Implementation Type': activity.implementationType || '',
-          'Call Type': activity.type || '',
-          'Status Code': activity.statusCode || '',
+      const data = this.activities.map((activity, activityIndex) => {
+        // Create comprehensive activity data with all available information
+        const baseData = {
+          // Basic Activity Information
+          'Row_Number': activityIndex + 1,
+          'Activity_Name': activity.name || '',
+          'Experience_Name': activity.experience || '',
+          'Activity_ID': activity.activityId || '',
+          'Experience_ID': activity.experienceId || '',
+          'Implementation_Type': activity.implementationType || '',
+          'Call_Type': activity.type || '',
+          'Status_Code': activity.statusCode || '',
           'Timestamp': new Date(activity.timestamp).toISOString(),
-          'Request URL': activity.requestDetails?.url || '',
-          'Request Method': activity.requestDetails?.method || '',
-          'Response Tokens': JSON.stringify(activity.details?.responseTokens || {})
+          'Detection_Time': new Date(activity.timestamp).toLocaleString(),
+          
+          // Request Information
+          'Request_URL': activity.requestDetails?.url || '',
+          'Request_Method': activity.requestDetails?.method || '',
+          'Request_Headers': JSON.stringify(activity.requestDetails?.headers || {}),
+          'Request_Payload': JSON.stringify(activity.requestDetails?.payload || {}),
+          
+          // Response Information
+          'Response_Status': activity.responseDetails?.statusCode || '',
+          'Response_Headers': JSON.stringify(activity.responseDetails?.headers || {}),
+          'Response_MIME_Type': activity.responseDetails?.mimeType || '',
+          
+          // Adobe Target Specific Data
+          'Client_Code': activity.details?.clientCode || '',
+          'Request_ID': activity.details?.requestId || '',
+          'Mboxes': (activity.details?.mboxes || []).join('; '),
+          'Mbox_Count': (activity.details?.mboxes || []).length,
+          
+          // Response Tokens (All)
+          'Response_Tokens_JSON': JSON.stringify(activity.details?.responseTokens || {}),
+          'Response_Tokens_Count': Object.keys(activity.details?.responseTokens || {}).length,
+          
+          // Page Modifications
+          'Page_Modifications_JSON': JSON.stringify(activity.details?.pageModifications || []),
+          'Page_Modifications_Count': (activity.details?.pageModifications || []).length,
+          
+          // Metrics
+          'Metrics_JSON': JSON.stringify(activity.details?.metrics || []),
+          'Metrics_Count': (activity.details?.metrics || []).length,
         };
+
+        // Add individual response tokens as separate columns
+        const responseTokens = activity.details?.responseTokens || {};
+        Object.entries(responseTokens).forEach(([key, value]) => {
+          const sanitizedKey = `Token_${key.replace(/[^a-zA-Z0-9_]/g, '_')}`;
+          baseData[sanitizedKey] = String(value || '');
+        });
+
+        // Add page modifications details
+        const modifications = activity.details?.pageModifications || [];
+        modifications.forEach((mod, modIndex) => {
+          baseData[`Modification_${modIndex + 1}_Type`] = mod.type || '';
+          baseData[`Modification_${modIndex + 1}_Selector`] = mod.selector || '';
+          baseData[`Modification_${modIndex + 1}_Content`] = String(mod.content || '').substring(0, 500); // Limit content length
+        });
+
+        // Add complete response body for at.js
+        if (activity.responseDetails?.option) {
+          baseData['AT_JS_Option_JSON'] = JSON.stringify(activity.responseDetails.option);
+          baseData['AT_JS_Mbox'] = activity.responseDetails.mbox || '';
+        }
+
+        // Add complete response body for Alloy.js
+        if (activity.responseDetails?.decision) {
+          baseData['Alloy_Decision_JSON'] = JSON.stringify(activity.responseDetails.decision);
+          baseData['Alloy_Decision_ID'] = activity.responseDetails.decision?.id || '';
+          baseData['Alloy_Decision_Scope'] = activity.responseDetails.decision?.scope || '';
+        }
+
+        if (activity.responseDetails?.item) {
+          baseData['Alloy_Item_JSON'] = JSON.stringify(activity.responseDetails.item);
+          baseData['Alloy_Item_ID'] = activity.responseDetails.item?.id || '';
+          baseData['Alloy_Item_Schema'] = activity.responseDetails.item?.schema || '';
+        }
+
+        // Complete handle array for Alloy.js
+        if (activity.responseDetails?.handle) {
+          baseData['Alloy_Handle_JSON'] = JSON.stringify(activity.responseDetails.handle);
+        }
+
+        // Add request payload details for better analysis
+        const requestPayload = activity.requestDetails?.payload || {};
+        if (requestPayload.id) {
+          baseData['Request_Visitor_ID'] = JSON.stringify(requestPayload.id);
+        }
+        if (requestPayload.execute) {
+          baseData['Request_Execute_JSON'] = JSON.stringify(requestPayload.execute);
+        }
+        if (requestPayload.prefetch) {
+          baseData['Request_Prefetch_JSON'] = JSON.stringify(requestPayload.prefetch);
+        }
+        if (requestPayload.experienceCloud) {
+          baseData['Request_Experience_Cloud_JSON'] = JSON.stringify(requestPayload.experienceCloud);
+        }
+
+        // Add analytics integration data if available
+        if (requestPayload.analytics) {
+          baseData['Request_Analytics_JSON'] = JSON.stringify(requestPayload.analytics);
+        }
+
+        // Add context data
+        if (requestPayload.context) {
+          baseData['Request_Context_JSON'] = JSON.stringify(requestPayload.context);
+        }
+
+        return baseData;
       });
 
       const csv = this.convertToCSV(data);
-      this.downloadCSV(csv, `adobe-target-activities-${new Date().toISOString().split('T')[0]}.csv`);
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('T')[0];
+      this.downloadCSV(csv, `adobe-target-complete-report-${timestamp}.csv`);
     } catch (error) {
-      console.error('Error downloading report:', error);
+      console.error('Error downloading comprehensive report:', error);
+      
+      // Fallback to basic report if comprehensive fails
+      try {
+        const basicData = this.activities.map(activity => ({
+          'Activity_Name': activity.name || '',
+          'Experience_Name': activity.experience || '',
+          'Activity_ID': activity.activityId || '',
+          'Status_Code': activity.statusCode || '',
+          'Timestamp': new Date(activity.timestamp).toISOString(),
+          'Error': 'Comprehensive export failed - basic data only'
+        }));
+        
+        const basicCsv = this.convertToCSV(basicData);
+        this.downloadCSV(basicCsv, `adobe-target-basic-report-${Date.now()}.csv`);
+      } catch (fallbackError) {
+        console.error('Even basic export failed:', fallbackError);
+      }
     }
   }
 
@@ -688,6 +916,7 @@ class TargetPopup {
       document.body.removeChild(link);
     }
   }
+
 
   showLoading() {
     const loadingContainer = document.getElementById('loadingContainer');
