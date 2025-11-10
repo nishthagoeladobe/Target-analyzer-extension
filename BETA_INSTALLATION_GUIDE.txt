@@ -1,0 +1,180 @@
+Adobe Target Inspector - Beta Testing Guide
+===========================================
+
+VERSION: 1.0.4 (Professional Compact Design)
+PACKAGE: adobe-target-inspector-beta.zip
+SIZE: 64 KB
+
+
+QUICK INSTALLATION (5 minutes)
+===============================
+
+Step 1: Extract the Files
+--------------------------
+1. Download the adobe-target-inspector-beta.zip file
+2. Extract it to a folder (e.g., Desktop/adobe-target-inspector)
+3. Remember this folder location
+
+
+Step 2: Install in Chrome
+--------------------------
+1. Open Google Chrome
+2. Type: chrome://extensions/ in the address bar
+3. Turn ON "Developer mode" (toggle in top-right corner)
+4. Click "Load unpacked"
+5. Select the extracted folder
+6. Done!
+
+
+WHAT'S NEW IN THIS VERSION
+===========================
+
+✨ Professional Design
+- Navy blue color scheme (no more red)
+- 30% more compact layout
+- Premium gradients and shadows
+- Better space utilization
+
+✨ Features
+- Activity detection (at.js & Alloy.js)
+- Performance analysis
+- Prehiding snippet testing with early removal
+- Real-time flicker measurement
+
+✨ Bug Fixes
+- CSP compliance (works on strict sites)
+- Activity validation (no false positives)
+- Tab wrapping fixed
+- All timestamps accurate
+
+
+WHAT TO TEST
+============
+
+1. Activities Tab
+   ☐ Scan for activities on Target-enabled pages
+   ☐ Activity details are accurate
+   ☐ Copy buttons work
+
+2. Performance Tab
+   ☐ "Refresh Metrics" shows page metrics
+   ☐ "Analyze Target Performance" button works
+   ☐ Timing data is accurate
+
+3. Snippet Test Tab
+   ☐ Test completes both phases
+   ☐ Results display correctly
+   ☐ Shows "No Activity" when appropriate
+   ☐ Prehiding snippet is removed early (not after 3 seconds)
+
+4. Visual Design
+   ☐ Professional navy blue theme
+   ☐ No text wrapping in tabs
+   ☐ Compact, efficient layout
+   ☐ All text is readable
+
+
+WEBSITES TO TEST ON
+===================
+
+Recommended:
+- Your own Adobe Target implementation
+- Bank of America (bankofamerica.com) - Alloy.js
+- Macy's (macys.com) - Strict CSP
+
+Look for:
+- Pages with Adobe Target activities
+- Pages with at.js or Alloy.js
+- Pages with Adobe Launch
+
+
+REPORTING ISSUES
+================
+
+Please provide:
+1. URL where you tested
+2. What you were doing (which tab/button)
+3. What happened vs. what you expected
+4. Screenshots (if applicable)
+5. Browser console errors (F12 → Console tab)
+6. Your Chrome version
+
+Send feedback to: [Your email/feedback channel]
+
+
+KNOWN BEHAVIORS (Not Bugs)
+==========================
+
+✓ "Developer mode" warning - Normal for unpacked extensions
+✓ Console logs - Intentional for debugging
+✓ "No Activity" on pages without Target - Correct behavior
+
+
+TROUBLESHOOTING
+===============
+
+Extension not loading?
+→ Make sure you extracted the .zip file first
+→ Select the folder containing manifest.json
+→ Reload the extension if you make changes
+
+Not detecting activities?
+→ Make sure the page has Adobe Target
+→ Check the console (F12) for logs
+→ Try "Start Monitoring & Reload" button
+
+Snippet test stuck?
+→ Clear browser cache first
+→ Make sure page has Target activities
+→ Check console for error messages
+
+
+VERSION HISTORY
+===============
+
+v1.0.4 (Current Beta)
+- Professional compact design
+- Navy blue color scheme
+- 30% space optimization
+- Tab wrapping fixed
+- Early prehiding removal
+- CSP compliance
+- Activity validation
+
+v1.0.3
+- Performance tab improvements
+- Flicker calculation fixes
+
+v1.0.2
+- Initial release
+
+
+PRIVACY & SECURITY
+==================
+
+✓ Only reads Adobe Target data from current page
+✓ No data sent to external servers
+✓ All processing is local
+✓ Open source code included
+
+
+TECHNICAL REQUIREMENTS
+======================
+
+- Chrome 88+ (or Chromium-based browsers)
+- Adobe Target on the page (at.js or Alloy.js)
+- JavaScript enabled
+
+
+THANK YOU FOR TESTING!
+======================
+
+Your feedback helps make this extension better for everyone.
+
+Questions? Issues? Suggestions?
+Contact: [Your contact info]
+
+
+---
+Beta Package Created: November 7, 2025
+

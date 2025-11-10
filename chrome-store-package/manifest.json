@@ -7,11 +7,26 @@
   "permissions": [
     "activeTab",
     "debugger",
-    "tabs"
+    "tabs",
+    "scripting",
+    "storage",
+    "browsingData",
+    "webNavigation"
+  ],
+  "host_permissions": [
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "background.js"
   },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["snippet-blocker.js", "snippet-injector.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'"
   },

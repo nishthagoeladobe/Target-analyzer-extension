@@ -1,0 +1,87 @@
+SUBJECT: Adobe Target Inspector - Beta Testing Invitation
+
+---
+
+Hi [Name],
+
+I'd like to invite you to beta test the Adobe Target Inspector Chrome extension.
+
+This tool helps analyze Adobe Target implementations, detect activities, measure performance, and test prehiding snippet impact.
+
+
+WHAT'S SPECIAL ABOUT THIS VERSION:
+===================================
+
+✨ Professional navy blue design (enterprise-grade)
+✨ 30% more compact and space-efficient
+✨ Detects at.js & Alloy.js activities automatically
+✨ Real-time performance analysis
+✨ Prehiding snippet testing (WITH vs WITHOUT comparison)
+✨ Works on strict CSP sites (Bank of America, Macy's, etc.)
+
+
+INSTALLATION (5 MINUTES):
+==========================
+
+1. Download attached: adobe-target-inspector-beta.zip
+2. Extract to a folder
+3. Open Chrome → chrome://extensions/
+4. Turn ON "Developer mode" (top-right toggle)
+5. Click "Load unpacked"
+6. Select the extracted folder
+7. Done!
+
+
+WHAT TO TEST:
+=============
+
+Try it on any page with Adobe Target:
+• Your company's website
+• Any site with at.js or Alloy.js
+• Test the Activities, Performance, and Snippet Test tabs
+
+See attached BETA_INSTALLATION_GUIDE.txt for detailed testing instructions.
+
+
+FEEDBACK NEEDED:
+================
+
+• Does it detect activities correctly?
+• Are the performance metrics useful?
+• Does the snippet test work properly?
+• Is the design professional and easy to use?
+• Any bugs or issues?
+
+
+REPLY TO THIS EMAIL WITH:
+=========================
+
+1. What pages you tested on
+2. What worked well
+3. What didn't work or was confusing
+4. Any feature suggestions
+5. Screenshots (if applicable)
+
+
+TIMELINE:
+=========
+
+Please test by [Date] and send feedback.
+This helps me make improvements before the public Chrome Web Store launch.
+
+
+THANK YOU!
+==========
+
+Your expertise in Adobe Target makes your feedback invaluable.
+
+Best regards,
+[Your name]
+
+
+---
+
+Attachments:
+- adobe-target-inspector-beta.zip (64 KB)
+- BETA_INSTALLATION_GUIDE.txt
+

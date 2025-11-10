@@ -1,0 +1,2331 @@
+class TargetPopup {
+  constructor() {
+    this.activities = [];
+    this.selectedActivityId = null;
+    this.currentTabId = null;
+    this.isAfterReload = false;
+  }
+
+  async init() {
+    try {
+      // Get current tab
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      this.currentTabId = tab.id;
+      
+      // Bind events first
+      this.bindEvents();
+      
+      // Check if already monitoring this tab (from previous session)
+      const response = await chrome.runtime.sendMessage({ 
+        type: 'GET_ACTIVITIES',
+        tabId: this.currentTabId 
+      });
+      
+      if (response && response.activities && response.activities.length > 0) {
+        // Already have activities from previous monitoring
+        this.activities = response.activities;
+        this.isDebugging = response.isDebugging;
+        this.updateUI();
+      } else {
+        // Show manual monitoring option - no automatic debugger attachment
+        this.showManualMonitoringState();
+      }
+      
+    } catch (error) {
+      this.showError('Failed to initialize extension');
+    }
+  }
+
+  async startMonitoring() {
+    try {
+      const response = await chrome.runtime.sendMessage({ 
+        type: 'START_MONITORING',
+        tabId: this.currentTabId 
+      });
+    } catch (error) {
+      console.error('Error starting monitoring:', error);
+    }
+  }
+
+  async loadActivities() {
+    try {
+      const response = await chrome.runtime.sendMessage({ 
+        type: 'GET_ACTIVITIES',
+        tabId: this.currentTabId 
+      });
+      
+      if (response && response.activities) {
+        this.activities = response.activities;
+        this.isDebugging = response.isDebugging;
+        this.debuggerDisabled = response.debuggerDisabled;
+      } else {
+        this.activities = [];
+        this.isDebugging = false;
+        this.debuggerDisabled = false;
+      }
+      
+      this.updateActivityList();
+      this.updateDetailsDropdown();
+      
+      // Auto-select first activity if none selected and activities exist
+      if (!this.selectedActivityId && this.activities.length > 0) {
+        this.selectActivity(this.activities[0].id);
+      }
+      
+      // Show appropriate state based on debugging status
+      if (this.debuggerDisabled && this.activities.length === 0) {
+        this.showDebuggerDisabledState();
+      }
+      
+    } catch (error) {
+      this.activities = [];
+      this.updateActivityList();
+    }
+  }
+
+  bindEvents() {
+    // Tab switching
+    document.querySelectorAll('.tab-button').forEach(button => {
+      button.addEventListener('click', (e) => {
+        this.switchTab(e.target.dataset.tab);
+      });
+    });
+
+    // Clear activities button
+    const clearBtn = document.getElementById('clearActivities');
+    if (clearBtn) {
+      clearBtn.addEventListener('click', async () => {
+        // Provide immediate visual feedback
+        const originalText = clearBtn.textContent;
+        
+        clearBtn.textContent = '🧹 Clearing...';
+        clearBtn.disabled = true;
+        clearBtn.style.opacity = '0.7';
+        
+        try {
+        this.switchTab('activities');
+        
+        await chrome.runtime.sendMessage({ 
+          type: 'CLEAR_ACTIVITIES',
+          tabId: this.currentTabId 
+        });
+          
+        this.activities = [];
+        this.selectedActivityId = null;
+        this.updateUI();
+          
+          // Show brief success feedback
+          clearBtn.textContent = '✅ Cleared!';
+          
+          setTimeout(() => {
+            clearBtn.textContent = originalText;
+            clearBtn.disabled = false;
+            clearBtn.style.opacity = '1';
+          }, 1000);
+          
+        } catch (error) {
+          // Reset button if there's an error
+          clearBtn.textContent = originalText;
+          clearBtn.disabled = false;
+          clearBtn.style.opacity = '1';
+          console.error('Error clearing activities:', error);
+        }
+      });
+    }
+
+    // Refresh activities button - ONLY way to start monitoring  
+    const refreshBtn = document.getElementById('refreshActivities');
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', async () => {
+        // Provide immediate visual feedback
+        const originalText = refreshBtn.textContent;
+        const originalDisabled = refreshBtn.disabled;
+        
+        // Update button to show it's working
+        refreshBtn.textContent = '⏳ Starting Monitoring...';
+        refreshBtn.disabled = true;
+        refreshBtn.style.opacity = '0.7';
+        refreshBtn.style.cursor = 'not-allowed';
+        
+        try {
+          this.isAfterReload = true;
+          this.switchTab('activities');
+          
+          // Show loading with specific message
+          this.showReloadingState('Starting Adobe Target monitoring...');
+          
+          this.activities = [];
+          this.selectedActivityId = null;
+          this.updateUI();
+          
+          await chrome.runtime.sendMessage({ 
+            type: 'CLEAR_ACTIVITIES',
+            tabId: this.currentTabId 
+          });
+          
+          // Start monitoring FIRST (this is when debugger notification appears)
+          refreshBtn.textContent = '🔍 Enabling Debugger...';
+          this.showReloadingState('Enabling Adobe Target detection...');
+          
+          await this.startMonitoring();
+          
+          // Update status before reload
+          this.showReloadingState('Reloading page to detect activities...');
+          refreshBtn.textContent = '📄 Reloading Page...';
+          
+          await chrome.tabs.reload(this.currentTabId);
+          
+          // Update status after reload
+          refreshBtn.textContent = '🔍 Scanning for Activities...';
+          this.showReloadingState('Page reloaded - scanning for Adobe Target activities...');
+          
+          setTimeout(async () => {
+            this.waitForActivitiesAfterReload();
+          }, 2000);
+          
+          // Reset button after monitoring starts
+          setTimeout(() => {
+            refreshBtn.textContent = originalText;
+            refreshBtn.disabled = false;
+            refreshBtn.style.opacity = '1';
+            refreshBtn.style.cursor = 'pointer';
+          }, 5000);
+          
+        } catch (error) {
+          // Reset button if there's an error
+          refreshBtn.textContent = originalText;
+          refreshBtn.disabled = originalDisabled;
+          refreshBtn.style.opacity = '1';
+          refreshBtn.style.cursor = 'pointer';
+          console.error('Error during monitoring setup:', error);
+        }
+      });
+    }
+
+    // Analyze Performance button - NEW APPROACH
+    const analyzePerfBtn = document.getElementById('analyzePerformance');
+    if (analyzePerfBtn) {
+      analyzePerfBtn.addEventListener('click', async () => {
+        const originalText = analyzePerfBtn.textContent;
+        analyzePerfBtn.textContent = '⏳ Analyzing...';
+        analyzePerfBtn.disabled = true;
+        
+        try {
+          // Analyze performance with context of detected activities
+          await this.analyzeTargetPerformance();
+          
+          // Switch to Performance tab
+          this.switchTab('performance');
+          
+          setTimeout(() => {
+            analyzePerfBtn.textContent = originalText;
+            analyzePerfBtn.disabled = false;
+          }, 1000);
+        } catch (error) {
+          console.error('Error analyzing performance:', error);
+          analyzePerfBtn.textContent = originalText;
+          analyzePerfBtn.disabled = false;
+        }
+      });
+    }
+
+    // Excel download
+    const downloadBtn = document.getElementById('copyAllActivities');
+    if (downloadBtn) {
+      downloadBtn.addEventListener('click', () => {
+        this.downloadExcelReport();
+      });
+    }
+
+    // Error report submission
+    const submitErrorBtn = document.getElementById('submitErrorReport');
+    if (submitErrorBtn) {
+      submitErrorBtn.addEventListener('click', () => {
+        this.submitErrorReport();
+      });
+    }
+
+    // Performance refresh button
+    const refreshPerfBtn = document.getElementById('refreshPerformance');
+    if (refreshPerfBtn) {
+      refreshPerfBtn.addEventListener('click', async () => {
+        const originalText = refreshPerfBtn.textContent;
+        refreshPerfBtn.textContent = '⏳ Loading...';
+        refreshPerfBtn.disabled = true;
+        
+        try {
+          await this.loadPerformanceMetrics();
+        } catch (error) {
+          console.error('Error refreshing performance metrics:', error);
+        } finally {
+          setTimeout(() => {
+            refreshPerfBtn.textContent = originalText;
+            refreshPerfBtn.disabled = false;
+          }, 500);
+        }
+      });
+    }
+  }
+
+  async waitForActivitiesAfterReload() {
+    let attempts = 0;
+    const maxAttempts = 15;
+    
+    const loadingContainer = document.getElementById('loadingContainer');
+    const loadingText = loadingContainer?.querySelector('p');
+    const statusText = document.getElementById('statusText');
+    
+    const checkForActivities = async () => {
+      attempts++;
+      
+      // Update progress message
+      const progressMessage = `Scanning for activities... (${attempts}/${maxAttempts})`;
+      if (loadingText) {
+        loadingText.textContent = progressMessage;
+      }
+      if (statusText) {
+        statusText.textContent = progressMessage;
+      }
+      
+      await this.loadActivities();
+      
+      if (this.activities.length > 0) {
+        // Success - activities found!
+        const successMessage = `✅ Found ${this.activities.length} activities!`;
+        if (loadingText) {
+          loadingText.textContent = successMessage;
+        }
+        if (statusText) {
+          statusText.textContent = successMessage;
+        }
+        
+        // Brief delay to show success message
+        setTimeout(() => {
+        this.hideLoading();
+        this.updateUI();
+        this.isAfterReload = false;
+          
+          // Reset loading text for next time
+        if (loadingText) {
+          loadingText.textContent = 'Detecting Adobe Target activities...';
+        }
+        }, 1000);
+        return;
+      }
+      
+      if (attempts >= maxAttempts) {
+        // Timeout - no activities found
+        const timeoutMessage = '⏰ Scan complete - no activities detected';
+        if (loadingText) {
+          loadingText.textContent = timeoutMessage;
+        }
+        if (statusText) {
+          statusText.textContent = timeoutMessage;
+        }
+        
+        setTimeout(() => {
+        this.hideLoading();
+        this.updateUI();
+        this.isAfterReload = false;
+          
+          // Reset loading text for next time
+        if (loadingText) {
+          loadingText.textContent = 'Detecting Adobe Target activities...';
+        }
+        }, 2000);
+        return;
+      }
+      
+      // Continue checking
+      setTimeout(checkForActivities, 1000);
+    };
+    
+    checkForActivities();
+  }
+
+  switchTab(tabName) {
+    document.querySelectorAll('.tab-button').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.tab === tabName);
+    });
+    document.querySelectorAll('.tab-panel').forEach(panel => {
+      panel.classList.toggle('active', panel.id === tabName);
+    });
+  }
+
+  showManualMonitoringState() {
+    const activityList = document.getElementById('activityList');
+    const emptyState = document.getElementById('emptyState');
+    const activityActions = document.getElementById('activityActions');
+    const loadingContainer = document.getElementById('loadingContainer');
+    
+    // Hide other elements
+    if (loadingContainer) loadingContainer.style.display = 'none';
+    if (activityList) activityList.style.display = 'none';
+    if (activityActions) activityActions.style.display = 'none';
+    
+    // Show manual monitoring state
+    if (emptyState) {
+      emptyState.style.display = 'block';
+      emptyState.innerHTML = `
+        <div class="empty-icon">🎯</div>
+        <h3>Ready to detect Adobe Target activities</h3>
+        <p>Click <strong>"🔍 Start Monitoring & Reload"</strong> below to begin detecting Adobe Target activities on this page.</p>
+        <div style="margin-top: 16px; padding: 12px; background: #f0f9ff; border-radius: 8px; font-size: 13px; color: #0369a1;">
+          ℹ️ <strong>Note:</strong> Chrome will show a "debugging" notification when you click Start Monitoring. This happens ONLY when you choose to monitor - never automatically. It's safe to allow.
+        </div>
+      `;
+    }
+    
+    // Update status
+    const statusText = document.getElementById('statusText');
+    if (statusText) statusText.textContent = 'Ready to monitor - Click Start Monitoring & Reload';
+  }
+
+  showDebuggerDisabledState() {
+    const activityList = document.getElementById('activityList');
+    const emptyState = document.getElementById('emptyState');
+    const activityActions = document.getElementById('activityActions');
+    const loadingContainer = document.getElementById('loadingContainer');
+    
+    // Hide other elements
+    if (loadingContainer) loadingContainer.style.display = 'none';
+    if (activityList) activityList.style.display = 'none';
+    if (activityActions) activityActions.style.display = 'none';
+    
+    // Show disabled state with option to re-enable
+    if (emptyState) {
+      emptyState.style.display = 'block';
+      emptyState.innerHTML = `
+        <div class="empty-icon">🔕</div>
+        <h3>Adobe Target monitoring is paused</h3>
+        <p>You cancelled the Chrome debugger notification. This is totally fine!<br><br>
+        <strong>To detect Adobe Target activities:</strong><br>
+        Click "Enable Monitoring" below and accept the Chrome debugger notification.</p>
+        <div style="margin-top: 16px; padding: 12px; background: #f0f9ff; border-radius: 8px; font-size: 13px; color: #0369a1;">
+          ℹ️ <strong>Why the notification appears:</strong><br>
+          Chrome shows this for security when extensions monitor network traffic. It's safe to allow for Adobe Target detection.
+        </div>
+        <button id="enableDebuggingBtn" class="btn btn-primary" style="margin-top: 16px;">
+          ✅ Enable Monitoring
+        </button>
+      `;
+      
+      // Bind enable debugging button
+      const enableBtn = document.getElementById('enableDebuggingBtn');
+      if (enableBtn) {
+        enableBtn.onclick = async () => {
+          enableBtn.textContent = '⏳ Enabling...';
+          enableBtn.disabled = true;
+          
+          try {
+            await chrome.runtime.sendMessage({ 
+              type: 'ENABLE_AUTO_DEBUGGING',
+              tabId: this.currentTabId 
+            });
+            
+            this.showLoading();
+            await this.loadActivities();
+            this.updateUI();
+          } catch (error) {
+            console.error('Error enabling debugging:', error);
+            enableBtn.textContent = 'Enable Monitoring';
+            enableBtn.disabled = false;
+          }
+        };
+      }
+    }
+    
+    // Update status
+    const statusText = document.getElementById('statusText');
+    if (statusText) statusText.textContent = 'Monitoring paused - Click Enable to detect activities';
+  }
+
+  updateActivityList() {
+    const activityList = document.getElementById('activityList');
+    const emptyState = document.getElementById('emptyState');
+    const activityActions = document.getElementById('activityActions');
+    
+    if (this.activities.length === 0) {
+      if (activityList) activityList.innerHTML = '';
+      
+      // Check if we need to show debugger disabled state
+      if (this.debuggerDisabled) {
+        this.showDebuggerDisabledState();
+        return;
+      }
+      
+      if (emptyState) emptyState.style.display = 'block';
+      if (activityActions) activityActions.style.display = 'none';
+      return;
+    }
+
+    if (emptyState) emptyState.style.display = 'none';
+    if (activityActions) activityActions.style.display = 'block';
+    
+    if (activityList) {
+      activityList.style.display = 'block';
+      activityList.innerHTML = this.activities.map(activity => `
+        <div class="activity-item" data-activity-id="${activity.id}">
+          <div class="activity-content">
+            <div class="activity-name">${this.escapeHtml(activity.name)}</div>
+            <div class="activity-experience">Experience: ${this.escapeHtml(activity.experience)}</div>
+            <div class="activity-id">ID: ${activity.activityId || 'N/A'} | Status: ${activity.statusCode}</div>
+          </div>
+          <div class="activity-badges">
+            <span class="call-type-badge ${activity.type.toLowerCase()}">${activity.type}</span>
+            <span class="implementation-badge ${activity.implementationType.toLowerCase()}">${activity.implementationType}</span>
+          </div>
+        </div>
+      `).join('');
+
+      // Add click handlers
+      activityList.querySelectorAll('.activity-item').forEach(item => {
+        item.addEventListener('click', () => {
+          const activityId = item.dataset.activityId;
+          this.selectActivity(activityId);
+        });
+      });
+    }
+  }
+
+  selectActivity(activityId) {
+    this.selectedActivityId = activityId;
+    
+    // Update visual selection
+    document.querySelectorAll('.activity-item').forEach(item => {
+      item.classList.toggle('selected', item.dataset.activityId === activityId);
+    });
+    
+    if (!this.isAfterReload) {
+      this.switchTab('details');
+    }
+    this.updateDetailsView();
+  }
+
+  updateDetailsDropdown() {
+    const selector = document.getElementById('activitySelector');
+    if (!selector) return;
+
+    if (this.activities.length === 0) {
+      selector.innerHTML = '<option value="">No activities detected</option>';
+      selector.disabled = true;
+      return;
+    }
+
+    selector.disabled = false;
+    selector.innerHTML = this.activities.map(activity => 
+      `<option value="${activity.id}">${this.escapeHtml(activity.name)} - ${this.escapeHtml(activity.experience)}</option>`
+    ).join('');
+
+    if (this.activities.length > 0 && !this.selectedActivityId) {
+      this.selectedActivityId = this.activities[0].id;
+    }
+
+    if (this.selectedActivityId) {
+      selector.value = this.selectedActivityId;
+    }
+
+    selector.addEventListener('change', (e) => {
+      this.selectActivity(e.target.value);
+    });
+
+    this.updateDetailsView();
+  }
+
+  updateDetailsView() {
+    const detailsContent = document.getElementById('detailsContent');
+    if (!detailsContent) return;
+
+    if (!this.selectedActivityId) {
+      detailsContent.innerHTML = '<p class="no-selection">Select an activity to view details</p>';
+      return;
+    }
+
+    const activity = this.activities.find(a => a.id === this.selectedActivityId);
+    if (!activity) {
+      detailsContent.innerHTML = '<p class="no-selection">Activity not found</p>';
+      return;
+    }
+
+    detailsContent.innerHTML = `
+      <div class="activity-selector">
+        <h3>📋 Activity Details</h3>
+        <select id="activitySelector">
+          ${this.activities.map(a => 
+            `<option value="${a.id}" ${a.id === this.selectedActivityId ? 'selected' : ''}>${this.escapeHtml(a.name)} - ${this.escapeHtml(a.experience)}</option>`
+          ).join('')}
+        </select>
+      </div>
+
+      <div class="detail-tabs">
+        <div class="detail-tab-buttons">
+          <button class="detail-tab-btn active" data-tab="overview">📊 Overview</button>
+          <button class="detail-tab-btn" data-tab="request">📤 Request</button>
+          <button class="detail-tab-btn" data-tab="response">📥 Response</button>
+          <button class="detail-tab-btn" data-tab="tokens">🏷️ Tokens</button>
+        </div>
+
+        <div class="detail-tab-content">
+          <div class="detail-tab-panel active" id="overview-panel">
+            <div class="overview-grid">
+              <div class="overview-section">
+                <h4>🎯 Activity Information</h4>
+                <div class="info-grid">
+                  <div class="info-item">
+                    <span class="info-label">Activity Name:</span>
+                    <span class="info-value">${this.escapeHtml(activity.name)}</span>
+                  </div>
+                  <div class="info-item">
+                    <span class="info-label">Experience:</span>
+                    <span class="info-value">${this.escapeHtml(activity.experience)}</span>
+                  </div>
+                  <div class="info-item">
+                    <span class="info-label">Activity ID:</span>
+                    <span class="info-value">${activity.activityId || 'Not Available'}</span>
+                  </div>
+                  <div class="info-item">
+                    <span class="info-label">Detected At:</span>
+                    <span class="info-value">${new Date(activity.timestamp).toLocaleString()}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="overview-section">
+                <h4>📦 Mbox Information</h4>
+                <div class="mbox-list">
+                  ${this.formatMboxInfoSimple(activity.details?.mboxes || [])}
+                </div>
+              </div>
+
+              <div class="overview-section">
+                <h4>🎨 Content Changes</h4>
+                <div class="modifications-preview">
+                  ${this.formatPageModificationsPreview(activity.details?.pageModifications || [])}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="detail-tab-panel" id="request-panel">
+            <div class="network-section">
+              <h4>🌐 Request Details</h4>
+              <div class="network-info">
+                <div class="network-item">
+                  <span class="network-label">URL:</span>
+                  <div class="network-value url-value">${this.escapeHtml(activity.requestDetails?.url || 'Not available')}</div>
+                </div>
+                <div class="network-item">
+                  <span class="network-label">Method:</span>
+                  <span class="method-badge">${activity.requestDetails?.method || 'Unknown'}</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="payload-section">
+              <h4>📋 Request Payload</h4>
+              <div class="json-viewer">
+                ${this.formatJsonViewer(activity.requestDetails?.payload, 'request')}
+              </div>
+            </div>
+          </div>
+
+          <div class="detail-tab-panel" id="response-panel">
+            <div class="network-section">
+              <h4>📊 Response Details</h4>
+              <div class="network-info">
+                <div class="network-item">
+                  <span class="network-label">Status Code:</span>
+                  <span class="status-badge status-${activity.statusCode}">${activity.statusCode}</span>
+                </div>
+                <div class="network-item">
+                  <span class="network-label">Content Type:</span>
+                  <span class="info-value">application/json</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="payload-section">
+              <h4>📥 Response Body</h4>
+              <div class="json-viewer">
+                ${this.formatJsonViewer(activity.responseDetails, 'response')}
+              </div>
+            </div>
+          </div>
+
+          <div class="detail-tab-panel" id="tokens-panel">
+            <div class="tokens-section">
+              <h4>🏷️ Response Tokens</h4>
+              <div class="tokens-grid">
+                ${this.formatResponseTokensTable(activity.details?.responseTokens || {})}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // Re-bind dropdown
+    const newSelector = document.getElementById('activitySelector');
+    if (newSelector) {
+      newSelector.addEventListener('change', (e) => {
+        this.selectActivity(e.target.value);
+      });
+    }
+
+    // Bind detail tab switching
+    document.querySelectorAll('.detail-tab-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const tabName = e.target.dataset.tab;
+        this.switchDetailTab(tabName);
+      });
+    });
+  }
+
+  switchDetailTab(tabName) {
+    // Update tab buttons
+    document.querySelectorAll('.detail-tab-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.tab === tabName);
+    });
+
+    // Update tab panels
+    document.querySelectorAll('.detail-tab-panel').forEach(panel => {
+      panel.classList.toggle('active', panel.id === `${tabName}-panel`);
+    });
+  }
+
+  formatJsonViewer(data, type) {
+    if (!data) {
+      return '<div class="no-data">No data available</div>';
+    }
+
+    try {
+      const jsonData = typeof data === 'string' ? JSON.parse(data) : data;
+      
+      return `
+        <div class="json-table-container">
+          <div class="json-table-header">
+            <span class="json-table-title">${type === 'request' ? 'Request' : 'Response'} Data</span>
+          </div>
+          <div class="json-table">
+            ${this.formatJsonAsTable(jsonData, '')}
+          </div>
+        </div>
+      `;
+    } catch (e) {
+      return `<div class="error-data">Error formatting JSON: ${e.message}</div>`;
+    }
+  }
+
+  formatJsonAsTable(obj, path = '') {
+    if (obj === null || obj === undefined) {
+      return '<div class="json-table-row"><div class="json-table-key">null</div><div class="json-table-value">null</div></div>';
+    }
+
+    if (typeof obj !== 'object') {
+      return `<div class="json-table-row"><div class="json-table-key">${path || 'value'}</div><div class="json-table-value">${this.escapeHtml(String(obj))}</div></div>`;
+    }
+
+    let html = '';
+    
+    if (Array.isArray(obj)) {
+      if (obj.length === 0) {
+        return `<div class="json-table-row"><div class="json-table-key">${path}</div><div class="json-table-value">[]</div></div>`;
+      }
+      
+      obj.forEach((item, index) => {
+        const itemPath = path ? `${path}[${index}]` : `[${index}]`;
+        if (typeof item === 'object' && item !== null) {
+          html += `<div class="json-table-section"><div class="json-table-section-header">${itemPath}</div>`;
+          html += this.formatJsonAsTable(item, '');
+          html += '</div>';
+        } else {
+          html += `<div class="json-table-row"><div class="json-table-key">${itemPath}</div><div class="json-table-value">${this.escapeHtml(String(item))}</div></div>`;
+        }
+      });
+    } else {
+      Object.entries(obj).forEach(([key, value]) => {
+        const currentPath = path ? `${path}.${key}` : key;
+        
+        if (value === null || value === undefined) {
+          html += `<div class="json-table-row"><div class="json-table-key">${currentPath}</div><div class="json-table-value">null</div></div>`;
+        } else if (typeof value === 'object') {
+          if (Array.isArray(value)) {
+            if (value.length === 0) {
+              html += `<div class="json-table-row"><div class="json-table-key">${currentPath}</div><div class="json-table-value">[]</div></div>`;
+            } else {
+              html += `<div class="json-table-section"><div class="json-table-section-header">${currentPath}</div>`;
+              html += this.formatJsonAsTable(value, '');
+              html += '</div>';
+            }
+          } else {
+            if (Object.keys(value).length === 0) {
+              html += `<div class="json-table-row"><div class="json-table-key">${currentPath}</div><div class="json-table-value">{}</div></div>`;
+            } else {
+              html += `<div class="json-table-section"><div class="json-table-section-header">${currentPath}</div>`;
+              html += this.formatJsonAsTable(value, '');
+              html += '</div>';
+            }
+          }
+        } else {
+          html += `<div class="json-table-row"><div class="json-table-key">${currentPath}</div><div class="json-table-value">${this.escapeHtml(String(value))}</div></div>`;
+        }
+      });
+    }
+    
+    return html;
+  }
+
+  formatResponseTokensTable(tokens) {
+    if (!tokens || Object.keys(tokens).length === 0) {
+      return '<div class="no-data">No response tokens available</div>';
+    }
+
+    const entries = Object.entries(tokens);
+    return `
+      <div class="tokens-table">
+        <div class="tokens-header">
+          <div class="token-key-header">Token Name</div>
+          <div class="token-value-header">Value</div>
+        </div>
+        ${entries.map(([key, value]) => `
+          <div class="token-row">
+            <div class="token-key">${this.escapeHtml(key)}</div>
+            <div class="token-value">${this.escapeHtml(String(value))}</div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  downloadExcelReport() {
+    try {
+      const data = this.activities.map((activity, activityIndex) => {
+        // Create comprehensive activity data with all available information
+        const baseData = {
+          // Basic Activity Information
+          'Row_Number': activityIndex + 1,
+          'Activity_Name': activity.name || '',
+          'Experience_Name': activity.experience || '',
+          'Activity_ID': activity.activityId || '',
+          'Experience_ID': activity.experienceId || '',
+          'Implementation_Type': activity.implementationType || '',
+          'Call_Type': activity.type || '',
+          'Status_Code': activity.statusCode || '',
+          'Timestamp': new Date(activity.timestamp).toISOString(),
+          'Detection_Time': new Date(activity.timestamp).toLocaleString(),
+          
+          // Request Information
+          'Request_URL': activity.requestDetails?.url || '',
+          'Request_Method': activity.requestDetails?.method || '',
+          'Request_Headers': JSON.stringify(activity.requestDetails?.headers || {}),
+          'Request_Payload': JSON.stringify(activity.requestDetails?.payload || {}),
+          
+          // Response Information
+          'Response_Status': activity.responseDetails?.statusCode || '',
+          'Response_Headers': JSON.stringify(activity.responseDetails?.headers || {}),
+          'Response_MIME_Type': activity.responseDetails?.mimeType || '',
+          
+          // Adobe Target Specific Data
+          'Client_Code': activity.details?.clientCode || '',
+          'Request_ID': activity.details?.requestId || '',
+          'Mboxes': (activity.details?.mboxes || []).join('; '),
+          'Mbox_Count': (activity.details?.mboxes || []).length,
+          
+          // Response Tokens (All)
+          'Response_Tokens_JSON': JSON.stringify(activity.details?.responseTokens || {}),
+          'Response_Tokens_Count': Object.keys(activity.details?.responseTokens || {}).length,
+          
+          // Page Modifications
+          'Page_Modifications_JSON': JSON.stringify(activity.details?.pageModifications || []),
+          'Page_Modifications_Count': (activity.details?.pageModifications || []).length,
+          
+          // Metrics
+          'Metrics_JSON': JSON.stringify(activity.details?.metrics || []),
+          'Metrics_Count': (activity.details?.metrics || []).length,
+        };
+
+        // Add individual response tokens as separate columns
+        const responseTokens = activity.details?.responseTokens || {};
+        Object.entries(responseTokens).forEach(([key, value]) => {
+          const sanitizedKey = `Token_${key.replace(/[^a-zA-Z0-9_]/g, '_')}`;
+          baseData[sanitizedKey] = String(value || '');
+        });
+
+        // Add page modifications details
+        const modifications = activity.details?.pageModifications || [];
+        modifications.forEach((mod, modIndex) => {
+          baseData[`Modification_${modIndex + 1}_Type`] = mod.type || '';
+          baseData[`Modification_${modIndex + 1}_Selector`] = mod.selector || '';
+          baseData[`Modification_${modIndex + 1}_Content`] = String(mod.content || '').substring(0, 500); // Limit content length
+        });
+
+        // Add complete response body for at.js
+        if (activity.responseDetails?.option) {
+          baseData['AT_JS_Option_JSON'] = JSON.stringify(activity.responseDetails.option);
+          baseData['AT_JS_Mbox'] = activity.responseDetails.mbox || '';
+        }
+
+        // Add complete response body for Alloy.js
+        if (activity.responseDetails?.decision) {
+          baseData['Alloy_Decision_JSON'] = JSON.stringify(activity.responseDetails.decision);
+          baseData['Alloy_Decision_ID'] = activity.responseDetails.decision?.id || '';
+          baseData['Alloy_Decision_Scope'] = activity.responseDetails.decision?.scope || '';
+        }
+
+        if (activity.responseDetails?.item) {
+          baseData['Alloy_Item_JSON'] = JSON.stringify(activity.responseDetails.item);
+          baseData['Alloy_Item_ID'] = activity.responseDetails.item?.id || '';
+          baseData['Alloy_Item_Schema'] = activity.responseDetails.item?.schema || '';
+        }
+
+        // Complete handle array for Alloy.js
+        if (activity.responseDetails?.handle) {
+          baseData['Alloy_Handle_JSON'] = JSON.stringify(activity.responseDetails.handle);
+        }
+
+        // Add request payload details for better analysis
+        const requestPayload = activity.requestDetails?.payload || {};
+        if (requestPayload.id) {
+          baseData['Request_Visitor_ID'] = JSON.stringify(requestPayload.id);
+        }
+        if (requestPayload.execute) {
+          baseData['Request_Execute_JSON'] = JSON.stringify(requestPayload.execute);
+        }
+        if (requestPayload.prefetch) {
+          baseData['Request_Prefetch_JSON'] = JSON.stringify(requestPayload.prefetch);
+        }
+        if (requestPayload.experienceCloud) {
+          baseData['Request_Experience_Cloud_JSON'] = JSON.stringify(requestPayload.experienceCloud);
+        }
+
+        // Add analytics integration data if available
+        if (requestPayload.analytics) {
+          baseData['Request_Analytics_JSON'] = JSON.stringify(requestPayload.analytics);
+        }
+
+        // Add context data
+        if (requestPayload.context) {
+          baseData['Request_Context_JSON'] = JSON.stringify(requestPayload.context);
+        }
+
+        return baseData;
+      });
+
+      const csv = this.convertToCSV(data);
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('T')[0];
+      this.downloadCSV(csv, `adobe-target-complete-report-${timestamp}.csv`);
+    } catch (error) {
+      console.error('Error downloading comprehensive report:', error);
+      
+      // Fallback to basic report if comprehensive fails
+      try {
+        const basicData = this.activities.map(activity => ({
+          'Activity_Name': activity.name || '',
+          'Experience_Name': activity.experience || '',
+          'Activity_ID': activity.activityId || '',
+          'Status_Code': activity.statusCode || '',
+          'Timestamp': new Date(activity.timestamp).toISOString(),
+          'Error': 'Comprehensive export failed - basic data only'
+        }));
+        
+        const basicCsv = this.convertToCSV(basicData);
+        this.downloadCSV(basicCsv, `adobe-target-basic-report-${Date.now()}.csv`);
+      } catch (fallbackError) {
+        console.error('Even basic export failed:', fallbackError);
+      }
+    }
+  }
+
+  convertToCSV(data) {
+    if (data.length === 0) return '';
+    const headers = Object.keys(data[0]);
+    const csvHeaders = headers.join(',');
+    const csvRows = data.map(row => {
+      return headers.map(header => {
+        const value = row[header] || '';
+        const escaped = String(value).replace(/"/g, '""');
+        return escaped.includes(',') || escaped.includes('"') || escaped.includes('\n') 
+          ? `"${escaped}"` : escaped;
+      }).join(',');
+    });
+    return [csvHeaders, ...csvRows].join('\n');
+  }
+
+  downloadCSV(csvContent, filename) {
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    if (link.download !== undefined) {
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', filename);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  }
+
+
+  showLoading() {
+    const loadingContainer = document.getElementById('loadingContainer');
+    const activityList = document.getElementById('activityList');
+    const emptyState = document.getElementById('emptyState');
+    const activityActions = document.getElementById('activityActions');
+    
+    if (loadingContainer) {
+      loadingContainer.style.display = 'flex';
+      // Reset to default loading message
+      const loadingText = loadingContainer.querySelector('p');
+      if (loadingText) {
+        loadingText.textContent = 'Detecting Adobe Target activities...';
+      }
+    }
+    
+    if (activityList) activityList.style.display = 'none';
+    if (emptyState) emptyState.style.display = 'none';
+    if (activityActions) activityActions.style.display = 'none';
+  }
+
+  showReloadingState(message) {
+    const loadingContainer = document.getElementById('loadingContainer');
+    const activityList = document.getElementById('activityList');
+    const emptyState = document.getElementById('emptyState');
+    const activityActions = document.getElementById('activityActions');
+    
+    // Show loading container with custom message
+    if (loadingContainer) {
+      loadingContainer.style.display = 'flex';
+      const loadingText = loadingContainer.querySelector('p');
+      if (loadingText) {
+        loadingText.textContent = message;
+      }
+    }
+    
+    // Hide other elements
+    if (activityList) activityList.style.display = 'none';
+    if (emptyState) emptyState.style.display = 'none';
+    if (activityActions) activityActions.style.display = 'none';
+    
+    // Update status text in header
+    const statusText = document.getElementById('statusText');
+    if (statusText) {
+      statusText.textContent = message;
+    }
+  }
+
+  hideLoading() {
+    const loadingContainer = document.getElementById('loadingContainer');
+    if (loadingContainer) {
+      loadingContainer.style.display = 'none';
+    }
+  }
+
+  updateUI() {
+    const statusText = document.getElementById('statusText');
+    const statusIndicator = document.getElementById('statusIndicator');
+
+    if (this.activities.length > 0) {
+      if (statusText) statusText.textContent = `${this.activities.length} Activities Detected`;
+      if (statusIndicator) statusIndicator.style.background = '#dc2626';
+    } else {
+      if (statusText) statusText.textContent = 'Monitoring Active - Refresh page to detect activities';
+      if (statusIndicator) statusIndicator.style.background = '#ff9800';
+    }
+
+    // Update summary cards
+    const totalCard = document.querySelector('#activitySummary .summary-number');
+    const mboxCard = document.querySelectorAll('#activitySummary .summary-number')[1];
+    
+    if (totalCard) totalCard.textContent = this.activities.length;
+    
+    if (mboxCard) {
+      const uniqueMboxes = new Set();
+      this.activities.forEach(activity => {
+        if (activity.details && activity.details.mboxes) {
+          activity.details.mboxes.forEach(mbox => uniqueMboxes.add(mbox));
+        }
+      });
+      mboxCard.textContent = uniqueMboxes.size;
+    }
+
+    this.hideLoading();
+    this.updateActivityList();
+  }
+
+  showError(message) {
+    const statusText = document.getElementById('statusText');
+    if (statusText) statusText.textContent = `Error: ${message}`;
+  }
+
+  async submitErrorReport() {
+    const textarea = document.getElementById('errorReportText');
+    const submitBtn = document.getElementById('submitErrorReport');
+    const statusSpan = document.getElementById('reportStatus');
+    
+    const errorText = textarea?.value?.trim();
+    
+    if (!errorText) {
+      this.showReportStatus('Please describe the issue before submitting.', 'error');
+      return;
+    }
+    
+    if (submitBtn) submitBtn.disabled = true;
+    this.showReportStatus('Sending report...', 'sending');
+    
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const currentUrl = tab?.url || 'Unknown';
+      
+      const emailData = {
+        to: 'nishtha.venice@gmail.com',
+        subject: 'Adobe Target Inspector - Error Report',
+        body: `Error Report from Adobe Target Inspector Extension
+
+Website: ${currentUrl}
+Timestamp: ${new Date().toISOString()}
+User Agent: ${navigator.userAgent}
+Activities Detected: ${this.activities.length}
+
+Issue Description:
+${errorText}
+
+---
+This report was automatically generated by the Adobe Target Inspector Chrome Extension.`
+      };
+      
+      const mailtoUrl = `mailto:${encodeURIComponent(emailData.to)}` +
+                       `?subject=${encodeURIComponent(emailData.subject)}` +
+                       `&body=${encodeURIComponent(emailData.body)}`;
+      
+      await chrome.tabs.create({ url: mailtoUrl, active: false });
+      
+      if (textarea) textarea.value = '';
+      this.showReportStatus('✅ Email client opened! Please send the email to complete your report.', 'success');
+      
+    } catch (error) {
+      this.showReportStatus('❌ Failed to open email client. Please email nishtha.venice@gmail.com directly.', 'error');
+    } finally {
+      setTimeout(() => {
+        if (submitBtn) submitBtn.disabled = false;
+      }, 2000);
+    }
+  }
+  
+  showReportStatus(message, type) {
+    const statusSpan = document.getElementById('reportStatus');
+    if (!statusSpan) return;
+    
+    statusSpan.textContent = message;
+    statusSpan.className = `report-status ${type}`;
+    
+    if (type !== 'success') {
+      setTimeout(() => {
+        statusSpan.textContent = '';
+        statusSpan.className = 'report-status';
+      }, 5000);
+    }
+  }
+
+  formatMboxInfoSimple(mboxes) {
+    if (!mboxes || mboxes.length === 0) {
+      return '<div class="no-data">No mbox information available</div>';
+    }
+    return mboxes.map(mbox => `
+      <div class="mbox-tag">${this.escapeHtml(mbox)}</div>
+    `).join('');
+  }
+
+  formatPageModificationsPreview(modifications) {
+    if (!modifications || modifications.length === 0) {
+      return '<div class="no-data">No content changes detected</div>';
+    }
+    
+    return modifications.slice(0, 3).map(mod => `
+      <div class="modification-item">
+        <span class="modification-type">${mod.type || 'Content Change'}</span>
+        <span class="modification-selector">${mod.selector || 'Page Element'}</span>
+      </div>
+    `).join('') + (modifications.length > 3 ? `<div class="more-modifications">+${modifications.length - 3} more</div>` : '');
+  }
+
+  async analyzeTargetPerformance() {
+    // NEW APPROACH: Analyze performance using ALREADY DETECTED activities
+    console.group('⚡ TARGET PERFORMANCE ANALYSIS');
+    console.log('Using activities from Activities tab:', this.activities.length, 'activities');
+    
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      
+      // Inject script to get performance metrics from the page
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => {
+          const perfData = {
+            navigation: {},
+            paint: {},
+            tagLibraries: [],
+            targetApiCalls: [],
+            metricsCollectedAt: Date.now()
+          };
+          
+          // Navigation Timing
+          if (window.performance && window.performance.timing) {
+            const timing = window.performance.timing;
+            const navigationStart = timing.navigationStart;
+            
+            perfData.navigation = {
+              pageLoadTime: timing.loadEventEnd - navigationStart,
+              domContentLoaded: timing.domContentLoadedEventEnd - navigationStart,
+              domInteractive: timing.domInteractive - navigationStart,
+              domComplete: timing.domComplete - navigationStart,
+              dnsTime: timing.domainLookupEnd - timing.domainLookupStart,
+              tcpTime: timing.connectEnd - timing.connectStart,
+              requestTime: timing.responseStart - timing.requestStart,
+              responseTime: timing.responseEnd - timing.responseStart,
+              navigationStartTimestamp: navigationStart
+            };
+          }
+          
+          // Paint Timing
+          if (window.performance && window.performance.getEntriesByType) {
+            const paintEntries = window.performance.getEntriesByType('paint');
+            perfData.paint = {};
+            paintEntries.forEach(entry => {
+              if (entry.name === 'first-paint') {
+                perfData.paint.firstPaint = Math.round(entry.startTime);
+              } else if (entry.name === 'first-contentful-paint') {
+                perfData.paint.firstContentfulPaint = Math.round(entry.startTime);
+              }
+            });
+            
+            // ONLY detect tag management libraries (Launch or Tealium)
+            const resources = window.performance.getEntriesByType('resource');
+            
+            // Tag libraries
+            perfData.tagLibraries = resources
+              .filter(r => {
+                const url = r.name.toLowerCase();
+                return (url.includes('assets.adobedtm.com') && url.includes('launch-')) ||
+                       url.includes('tags.tiqcdn.com') || url.includes('utag.js');
+              })
+              .map(r => ({
+                name: r.name,
+                type: r.name.includes('adobedtm') ? 'Adobe Launch/Tags' : 'Tealium iQ',
+                startTime: Math.round(r.startTime),
+                duration: Math.round(r.duration),
+                endTime: Math.round(r.startTime + r.duration),
+                transferSize: r.transferSize
+              }));
+            
+            // Target API calls (Adobe Edge Network /interact)
+            perfData.targetApiCalls = resources
+              .filter(r => {
+                const url = r.name.toLowerCase();
+                return url.includes('/ee/v1/interact') ||
+                       url.includes('/ee/or2/v1/interact') ||
+                       (url.includes('demdex.net') && url.includes('/interact')) ||
+                       (url.includes('adobedc.net') && url.includes('/interact'));
+              })
+              .map(r => ({
+                name: r.name,
+                startTime: Math.round(r.startTime),
+                duration: Math.round(r.duration),
+                endTime: Math.round(r.startTime + r.duration),
+                transferSize: r.transferSize
+              }))
+              .sort((a, b) => a.startTime - b.startTime);
+          }
+          
+          return perfData;
+        }
+      });
+      
+      const pagePerformance = results[0].result;
+      
+      // Store performance data with activities context
+      this.performanceData = {
+        pageMetrics: pagePerformance,
+        activities: this.activities, // Use ALREADY DETECTED activities
+        analyzedAt: Date.now()
+      };
+      
+      console.log('✅ Performance analysis complete:', {
+        activities: this.activities.length,
+        tagLibraries: pagePerformance.tagLibraries.length,
+        targetApiCalls: pagePerformance.targetApiCalls.length
+      });
+      console.groupEnd();
+      
+      // Display the metrics
+      this.displayTargetPerformanceMetrics();
+      
+    } catch (error) {
+      console.error('Error analyzing Target performance:', error);
+      console.groupEnd();
+      this.showPerformanceError('Unable to analyze performance. Please try again.');
+    }
+  }
+
+  async loadPerformanceMetrics() {
+    // OLD METHOD - kept for manual refresh
+    try {
+      // Check if we have stored performance data from Activities tab
+      if (this.performanceData) {
+        console.log('📊 Using performance data from Activities analysis');
+        this.displayTargetPerformanceMetrics();
+        return;
+      }
+      
+      // Otherwise show instruction to use Activities tab first
+      const analyticsContainer = document.getElementById('performanceAnalytics');
+      if (analyticsContainer) {
+        analyticsContainer.innerHTML = `
+          <div class="analytics-placeholder">
+            <h3>📋 How to Analyze Target Performance</h3>
+            <p><strong>Step 1:</strong> Go to <strong>Activities</strong> tab</p>
+            <p><strong>Step 2:</strong> Click <strong>"🔍 Start Monitoring & Reload"</strong></p>
+            <p><strong>Step 3:</strong> Wait for activities to be detected</p>
+            <p><strong>Step 4:</strong> Click <strong>"⚡ Analyze Target Performance"</strong> button</p>
+            <p style="margin-top: 16px; color: #6b7280; font-size: 12px;">
+              ℹ️ This ensures performance metrics are tied to actual detected activities.
+            </p>
+          </div>
+        `;
+      }
+      
+    } catch (error) {
+      console.error('Error loading performance metrics:', error);
+      this.showPerformanceError('Please use Activities tab to analyze Target performance.');
+    }
+  }
+
+  displayTargetPerformanceMetrics() {
+    if (!this.performanceData) {
+      console.warn('No performance data available');
+      return;
+    }
+    
+    const pagePerf = this.performanceData.pageMetrics;
+    const activities = this.performanceData.activities;
+    const hasActivities = activities && activities.length > 0;
+    
+    console.group('📊 DISPLAYING TARGET PERFORMANCE METRICS');
+    console.log('Activities:', activities.length);
+    console.log('Tag Libraries:', pagePerf.tagLibraries);
+    console.log('Target API Calls:', pagePerf.targetApiCalls);
+    console.groupEnd();
+          const perfData = {
+            navigation: {},
+            paint: {},
+            resources: [],
+            targetLibrary: null
+          };
+          
+          // Navigation Timing
+          if (window.performance && window.performance.timing) {
+            const timing = window.performance.timing;
+            const navigationStart = timing.navigationStart;
+            
+            perfData.navigation = {
+              pageLoadTime: timing.loadEventEnd - navigationStart,
+              domContentLoaded: timing.domContentLoadedEventEnd - navigationStart,
+              domInteractive: timing.domInteractive - navigationStart,
+              domComplete: timing.domComplete - navigationStart,
+              dnsTime: timing.domainLookupEnd - timing.domainLookupStart,
+              tcpTime: timing.connectEnd - timing.connectStart,
+              requestTime: timing.responseStart - timing.requestStart,
+              responseTime: timing.responseEnd - timing.responseStart,
+              renderTime: timing.domComplete - timing.domLoading,
+              navigationStartTimestamp: navigationStart // Absolute timestamp when page started
+            };
+          }
+          
+          // Add current timestamp for when metrics are collected
+          perfData.metricsCollectedAt = Date.now();
+          
+          // Paint Timing
+          if (window.performance && window.performance.getEntriesByType) {
+            const paintEntries = window.performance.getEntriesByType('paint');
+            paintEntries.forEach(entry => {
+              if (entry.name === 'first-paint') {
+                perfData.paint.firstPaint = Math.round(entry.startTime);
+              } else if (entry.name === 'first-contentful-paint') {
+                perfData.paint.firstContentfulPaint = Math.round(entry.startTime);
+              }
+            });
+          }
+          
+          // Adobe Target Library Detection from window objects
+          // NOTE: This is INFORMATIONAL ONLY - not used for timing!
+          // We use Resource Timing API for actual library detection
+          if (window.adobe && window.adobe.target) {
+            perfData.targetLibrary = {
+              version: window.adobe.target.VERSION || 'unknown',
+              loaded: true,
+              globalMboxAutoCreate: window.targetGlobalSettings?.globalMboxAutoCreate !== false,
+              note: 'Detected via window.adobe.target - may be at.js OR alloy.js with Target module'
+            };
+          } else if (window.alloy) {
+            perfData.targetLibrary = {
+              version: 'alloy',
+              loaded: true,
+              note: 'Detected via window.alloy'
+            };
+          }
+          
+          // IMPORTANT: Do NOT use perfData.targetLibrary for display
+          // Only use libraries detected via Resource Timing API!
+          
+          // Get Resource Timing for Adobe libraries and API calls
+          if (window.performance && window.performance.getEntriesByType) {
+            const resources = window.performance.getEntriesByType('resource');
+            
+            // Identify Adobe libraries with specific types
+            perfData.resources = resources
+              .filter(r => {
+                const name = r.name.toLowerCase();
+                // ONLY detect tag management libraries (Launch or Tealium)
+                return name.includes('assets.adobedtm.com') || name.includes('launch-') ||
+                       name.includes('tealium') || name.includes('utag.js') ||
+                       name.includes('tags.tiqcdn.com');
+              })
+              .map(r => {
+                const url = r.name; // Full URL from Resource Timing
+                const name = url.toLowerCase();
+                let libraryType = null;
+                let isLibrary = false;
+                let detectionMethod = null;
+                
+                // ONLY identify tag management libraries (Launch or Tealium)
+                if (name.includes('assets.adobedtm.com') && name.includes('launch-')) {
+                  libraryType = 'Adobe Launch/Tags';
+                  isLibrary = true;
+                  detectionMethod = 'URL contains: "assets.adobedtm.com" + "launch-"';
+                  console.log('✅ DETECTED TAG LIBRARY:', libraryType, '\n   URL:', url);
+                } else if (name.includes('tags.tiqcdn.com') || name.includes('utag.js')) {
+                  libraryType = 'Tealium iQ Tag Management';
+                  isLibrary = true;
+                  detectionMethod = 'URL contains: "tags.tiqcdn.com" or "utag.js"';
+                  console.log('✅ DETECTED TAG LIBRARY:', libraryType, '\n   URL:', url);
+                }
+                
+                return {
+                  name: r.name, // Keep full URL
+                  duration: Math.round(r.duration),
+                  startTime: Math.round(r.startTime),
+                  endTime: Math.round(r.startTime + r.duration),
+                  initiatorType: r.initiatorType,
+                  transferSize: r.transferSize,
+                  isLibrary: isLibrary,
+                  libraryType: libraryType,
+                  detectionMethod: detectionMethod
+                };
+              })
+              .filter(r => r.isLibrary); // Only keep tag management libraries
+            
+            // Find Target API calls - specifically Adobe Edge /interact calls
+            perfData.targetApiCalls = resources
+              .filter(r => {
+                const name = r.name.toLowerCase();
+                // Match your actual URL: adobedc.demdex.net/ee/v1/interact
+                const isTargetCall = name.includes('/ee/v1/interact') || 
+                                    name.includes('/ee/or2/v1/interact') ||
+                                    (name.includes('demdex.net') && name.includes('/interact')) ||
+                                    (name.includes('adobedc.net') && name.includes('/interact'));
+                
+                if (isTargetCall) {
+                  console.log('🎯 DETECTED TARGET API CALL (Adobe Edge Network)');
+                  console.log('   URL:', r.name);
+                  console.log('   Timing:', {
+                    startTime: Math.round(r.startTime) + 'ms',
+                    duration: Math.round(r.duration) + 'ms',
+                    endTime: Math.round(r.startTime + r.duration) + 'ms',
+                    cached: r.transferSize === 0 ? 'YES (⚡)' : 'NO (🌐 network)',
+                    transferSize: r.transferSize + ' bytes'
+                  });
+                }
+                
+                return isTargetCall;
+              })
+              .map(r => ({
+                name: r.name,
+                duration: Math.round(r.duration),
+                startTime: Math.round(r.startTime),
+                endTime: Math.round(r.startTime + r.duration),
+                transferSize: r.transferSize,
+                responseStatus: r.responseStatus
+              }))
+              .sort((a, b) => a.startTime - b.startTime); // Sort by start time
+          }
+          
+          return perfData;
+        }
+      });
+      
+      const pagePerformance = results[0].result;
+      
+      // Debug: Show what was actually detected with URL pattern matching
+      console.group('🔍 RESOURCE TIMING - HOW LIBRARIES WERE IDENTIFIED');
+      
+      console.log('📋 ALL Resources from window.performance.getEntriesByType("resource"):');
+      console.log(pagePerformance.resources.map(r => ({
+        url: r.name,
+        identifiedAs: r.libraryType || 'NOT an Adobe library',
+        matchedPattern: this.explainLibraryMatch(r.name),
+        timing: { start: r.startTime, duration: r.duration, end: r.endTime },
+        isLibrary: r.isLibrary
+      })));
+      
+      console.log('');
+      console.log('🏷️ LIBRARIES IDENTIFIED (what will be shown in UI):');
+      const detectedLibs = pagePerformance.resources.filter(r => r.isLibrary);
+      if (detectedLibs.length === 0) {
+        console.log('   ❌ NO Adobe libraries detected in Resource Timing!');
+      } else {
+        detectedLibs.forEach(lib => {
+          console.log(`   ✅ ${lib.libraryType}`);
+          console.log(`      URL: ${lib.name}`);
+          console.log(`      Timing: ${lib.startTime}ms → ${lib.endTime}ms (${lib.duration}ms)`);
+        });
+      }
+      
+      console.log('');
+      console.log('🎯 TARGET API CALLS (filtered by URL pattern):');
+      if (!pagePerformance.targetApiCalls || pagePerformance.targetApiCalls.length === 0) {
+        console.log('   ❌ NO Target API calls detected in Resource Timing!');
+      } else {
+        pagePerformance.targetApiCalls.forEach(call => {
+          console.log(`   ✅ API Call: ${call.name}`);
+          console.log(`      Pattern: ${this.explainApiCallMatch(call.name)}`);
+          console.log(`      Timing: ${call.startTime}ms → ${call.endTime}ms (${call.duration}ms)`);
+          console.log(`      Cached: ${call.transferSize === 0 ? 'YES ⚡' : 'NO 🌐'} (${call.transferSize} bytes)`);
+        });
+      }
+      
+      console.log('');
+      console.log('═══════════════════════════════════════════════════════════');
+      console.log('⚠️ VALIDATION: What should appear in UI?');
+      console.log('═══════════════════════════════════════════════════════════');
+      console.log('');
+      console.log('Libraries that WILL be shown:');
+      if (detectedLibs.length === 0) {
+        console.log('   ❌ NONE - No libraries detected!');
+        console.log('   UI will say: "No Adobe library detected"');
+      } else {
+        detectedLibs.forEach((lib, i) => {
+          console.log(`   ${i + 1}. ${lib.libraryType}`);
+        });
+      }
+      console.log('');
+      console.log('Possible tag libraries (checking for):');
+      const possibleLibs = ['Adobe Launch/Tags', 'Tealium iQ'];
+      const notDetected = possibleLibs.filter(libName => 
+        !detectedLibs.some(lib => lib.libraryType && lib.libraryType.includes(libName.split(' ')[0]))
+      );
+      if (notDetected.length > 0) {
+        notDetected.forEach(lib => console.log(`   ❌ ${lib} - NOT detected`));
+      }
+      console.log('');
+      console.log('🚨 VALIDATION: UI should ONLY show libraries from "WILL be shown" list!');
+      console.log('═══════════════════════════════════════════════════════════');
+      
+      console.groupEnd();
+      
+      console.group('🎨 PAINT TIMING');
+      console.log('First Paint:', pagePerformance.paint.firstPaint, 'ms');
+      console.log('First Contentful Paint:', pagePerformance.paint.firstContentfulPaint, 'ms');
+      console.groupEnd();
+      
+      // Validation Summary - Show what was actually detected
+      console.group('📊 PERFORMANCE ANALYSIS SUMMARY');
+      
+      const detectedLibraries = pagePerformance.resources.filter(r => r.isLibrary);
+      console.log('Libraries Detected:', detectedLibraries.map(lib => ({
+        type: lib.libraryType,
+        startTime: lib.startTime,
+        duration: lib.duration,
+        endTime: lib.endTime
+      })));
+      
+      console.log('Target API Calls:', pagePerformance.targetApiCalls?.map(call => ({
+        startTime: call.startTime,
+        duration: call.duration,
+        endTime: call.endTime,
+        cached: call.transferSize === 0,
+        url: call.name
+      })) || 'None detected');
+      
+      // Show flicker calculation
+      const fcp = pagePerformance.paint.firstContentfulPaint;
+      const activityEnd = pagePerformance.targetApiCalls?.[0]?.endTime;
+      if (fcp && activityEnd) {
+        console.log('Flicker Calculation:', {
+          formula: 'Activity End Time - First Contentful Paint',
+          fcp: `${fcp}ms`,
+          activityEnd: `${activityEnd}ms`,
+          flicker: `${activityEnd - fcp}ms`
+        });
+      } else {
+        console.log('Flicker: Cannot calculate (missing FCP or API call)');
+      }
+      
+      console.groupEnd();
+      
+      // Display the metrics - Pass detected activities to validate real Target content
+      this.displayPerformanceMetrics(pagePerformance, detectedActivities);
+      
+      // Generate analytics - Include activity validation
+      this.generatePerformanceAnalytics(pagePerformance, detectedActivities);
+      
+    } catch (error) {
+      console.error('Error loading performance metrics:', error);
+      this.showPerformanceError('Unable to collect performance metrics. Please refresh the page and try again.');
+    }
+  }
+
+  displayPerformanceMetrics(pagePerf, detectedActivities = []) {
+    // Uses Resource Timing API + validates against ACTUAL detected activities
+    
+    // Validate if there are REAL Target activities (not just API calls)
+    const hasRealActivities = detectedActivities && detectedActivities.length > 0;
+    
+    console.log('✅ ACTIVITY VALIDATION:', {
+      apiCallsDetected: pagePerf.targetApiCalls?.length || 0,
+      realActivitiesDetected: detectedActivities.length,
+      shouldShowActivityTiming: hasRealActivities
+    });
+    
+    // Display data freshness information
+    const pageLoadedTimestamp = pagePerf.navigation.navigationStartTimestamp;
+    const metricsCollectedTimestamp = pagePerf.metricsCollectedAt;
+    const dataAge = metricsCollectedTimestamp - pageLoadedTimestamp; // How old is the data
+    
+    if (pageLoadedTimestamp) {
+      const pageLoadedDate = new Date(pageLoadedTimestamp);
+      document.getElementById('pageLoadedAt').textContent = pageLoadedDate.toLocaleTimeString();
+    }
+    
+    if (metricsCollectedTimestamp) {
+      const collectedDate = new Date(metricsCollectedTimestamp);
+      document.getElementById('metricsCollectedAt').textContent = collectedDate.toLocaleTimeString();
+    }
+    
+    // Show data freshness with warning if stale
+    const freshnessElement = document.getElementById('dataFreshness');
+    const banner = document.getElementById('performanceInfoBanner');
+    
+    if (dataAge < 10000) { // Less than 10 seconds
+      freshnessElement.textContent = `Fresh (${Math.round(dataAge / 1000)}s ago)`;
+      freshnessElement.className = 'info-value fresh';
+      banner.className = 'performance-info-banner';
+    } else if (dataAge < 60000) { // Less than 1 minute
+      freshnessElement.textContent = `${Math.round(dataAge / 1000)}s ago`;
+      freshnessElement.className = 'info-value';
+      banner.className = 'performance-info-banner';
+    } else { // More than 1 minute - stale!
+      const minutes = Math.round(dataAge / 60000);
+      freshnessElement.textContent = `⚠️ Stale (${minutes} min ago - reload page for fresh data)`;
+      freshnessElement.className = 'info-value stale';
+      banner.className = 'performance-info-banner stale';
+    }
+    
+    // Page Load Metrics
+    document.getElementById('pageLoadTime').textContent = 
+      pagePerf.navigation.pageLoadTime ? `${Math.round(pagePerf.navigation.pageLoadTime)}ms` : 'N/A';
+    
+    document.getElementById('firstPaint').textContent = 
+      pagePerf.paint.firstPaint ? `${pagePerf.paint.firstPaint}ms` : 'N/A';
+    
+    document.getElementById('firstContentfulPaint').textContent = 
+      pagePerf.paint.firstContentfulPaint ? `${pagePerf.paint.firstContentfulPaint}ms` : 'N/A';
+    
+    // Build timing sequence table using REAL network timing
+    const timingEvents = [];
+    
+    // First Paint
+    if (pagePerf.paint.firstPaint) {
+      timingEvents.push({
+        name: '🎨 First Paint',
+        startTime: 0,
+        duration: pagePerf.paint.firstPaint,
+        endTime: pagePerf.paint.firstPaint,
+        type: 'paint'
+      });
+    }
+    
+    // First Contentful Paint
+    if (pagePerf.paint.firstContentfulPaint) {
+      timingEvents.push({
+        name: '🎨 First Contentful Paint',
+        startTime: 0,
+        duration: pagePerf.paint.firstContentfulPaint,
+        endTime: pagePerf.paint.firstContentfulPaint,
+        type: 'paint'
+      });
+    }
+    
+    // DOM Interactive
+    if (pagePerf.navigation.domInteractive) {
+      timingEvents.push({
+        name: '📄 DOM Interactive',
+        startTime: 0,
+        duration: Math.round(pagePerf.navigation.domInteractive),
+        endTime: Math.round(pagePerf.navigation.domInteractive),
+        type: 'dom'
+      });
+    }
+    
+    // Adobe Libraries - Show ALL detected libraries with specific types
+    const adobeLibraries = pagePerf.resources.filter(r => r.isLibrary);
+    adobeLibraries.forEach(library => {
+      const fileName = library.name.split('/').pop();
+      timingEvents.push({
+        name: `📦 ${library.libraryType}`,
+        startTime: library.startTime,
+        duration: library.duration,
+        endTime: library.endTime,
+        type: 'library',
+        details: fileName.length > 50 ? fileName.substring(0, 47) + '...' : fileName
+      });
+    });
+    
+    // Target API Calls - ONLY show if REAL activities were detected
+    // (API call doesn't mean activity was delivered - could be empty response)
+    if (hasRealActivities && pagePerf.targetApiCalls && pagePerf.targetApiCalls.length > 0) {
+      pagePerf.targetApiCalls.forEach((apiCall, index) => {
+        const callNumber = pagePerf.targetApiCalls.length > 1 ? ` (Call ${index + 1})` : '';
+        const isFromCache = apiCall.transferSize === 0;
+        
+        timingEvents.push({
+          name: `🎯 Target Activity Delivery${callNumber}`,
+          startTime: apiCall.startTime,
+          duration: apiCall.duration,
+          endTime: apiCall.endTime,
+          type: 'api',
+          cached: isFromCache,
+          details: isFromCache ? '(cached)' : '(network)'
+        });
+      });
+    } else if (!hasRealActivities && pagePerf.targetApiCalls && pagePerf.targetApiCalls.length > 0) {
+      // Show API call was made but no activities delivered
+      const apiCall = pagePerf.targetApiCalls[0];
+      timingEvents.push({
+        name: '⚠️ Target API Call (No Activities Delivered)',
+        startTime: apiCall.startTime,
+        duration: apiCall.duration,
+        endTime: apiCall.endTime,
+        type: 'api-no-activity',
+        cached: apiCall.transferSize === 0,
+        details: 'API called but response had no personalization'
+      });
+    }
+    
+    // DOM Complete
+    if (pagePerf.navigation.domComplete) {
+      timingEvents.push({
+        name: '✅ DOM Complete',
+        startTime: 0,
+        duration: Math.round(pagePerf.navigation.domComplete),
+        endTime: Math.round(pagePerf.navigation.domComplete),
+        type: 'dom'
+      });
+    }
+    
+    // Debug: Log all timing events before sorting
+    console.group('🕐 Performance Timing Events');
+    timingEvents.forEach(event => {
+      console.log(`${event.name}:`, {
+        startTime: event.startTime,
+        duration: event.duration,
+        endTime: event.endTime,
+        type: event.type
+      });
+    });
+    console.groupEnd();
+    
+    // Sort events by START TIME to show actual sequence (what started first)
+    // For events with same start time (like 0ms), sort by end time
+    timingEvents.sort((a, b) => {
+      if (a.startTime !== b.startTime) {
+        return a.startTime - b.startTime; // Sort by when they STARTED
+      }
+      return a.endTime - b.endTime; // If same start, sort by when they ended
+    });
+    
+    // Validate sequence: Target API call MUST start after library finishes
+    const targetApiEvent = timingEvents.find(e => e.type === 'api');
+    const targetLibEvent = timingEvents.find(e => 
+      e.type === 'library' && (e.name.includes('Target') || e.name.includes('Web SDK') || e.name.includes('Launch'))
+    );
+    
+    if (targetApiEvent && targetLibEvent) {
+      if (targetApiEvent.startTime < targetLibEvent.endTime) {
+        console.warn('⚠️ IMPOSSIBLE SEQUENCE DETECTED:', {
+          library: `${targetLibEvent.name} ends at ${targetLibEvent.endTime}ms`,
+          apiCall: `API call starts at ${targetApiEvent.startTime}ms`,
+          message: 'API call cannot start before library finishes!'
+        });
+        
+        // Add warning event to table
+        timingEvents.push({
+          name: '⚠️ TIMING ERROR DETECTED',
+          startTime: 0,
+          duration: 0,
+          endTime: 0,
+          type: 'error',
+          details: 'API call appears before library - check Resource Timing API data'
+        });
+      }
+    }
+    
+    // Log what will actually be shown in the UI table
+    console.group('📊 TIMING TABLE - WHAT WILL BE DISPLAYED IN UI');
+    console.log('Total events to display:', timingEvents.length);
+    timingEvents.forEach((event, index) => {
+      console.log(`Row #${index + 1}: ${event.name}`);
+      console.log(`  Start: ${event.startTime}ms | Duration: ${event.duration}ms | End: ${event.endTime}ms`);
+      console.log(`  Type: ${event.type}${event.cached !== undefined ? ` | Cached: ${event.cached}` : ''}`);
+    });
+    console.groupEnd();
+    
+    // Populate timing table
+    this.populateTimingTable(timingEvents);
+    
+    // Update timeline bars - ONLY show tag management libraries (Launch or Tealium)
+    console.log('🔍 TIMELINE BAR - Tag Library Selection:');
+    console.log('  Available libraries from Resource Timing:', adobeLibraries.map(lib => lib.libraryType));
+    
+    const targetLibrary = adobeLibraries.find(lib => 
+      lib.libraryType && lib.libraryType.includes('Launch')  // Adobe Launch
+    ) || adobeLibraries.find(lib => 
+      lib.libraryType && lib.libraryType.includes('Tealium')  // Tealium
+    );
+    
+    if (targetLibrary && targetLibrary.libraryType) {
+      console.log('  ✅ Selected for display:', targetLibrary.libraryType);
+      console.log('  URL:', targetLibrary.name);
+      console.log('  Timing:', `${targetLibrary.startTime}ms → ${targetLibrary.endTime}ms`);
+      
+      document.getElementById('libraryLoadTime').textContent = `${targetLibrary.duration}ms (${targetLibrary.libraryType})`;
+      const libraryBar = document.getElementById('libraryLoadBar');
+      const maxTime = pagePerf.navigation.pageLoadTime || 5000;
+      const widthPercent = Math.min((targetLibrary.duration / maxTime) * 100, 100);
+      libraryBar.style.width = `${widthPercent}%`;
+      
+      // Position the bar based on start time
+      const startPercent = Math.min((targetLibrary.startTime / maxTime) * 100, 100);
+      libraryBar.style.marginLeft = `${startPercent}%`;
+    } else {
+      // NO libraries detected - don't show fake data!
+      console.log('  ❌ NO libraries detected in Resource Timing API');
+      console.log('  Timeline bar will show: "No library detected"');
+      document.getElementById('libraryLoadTime').textContent = 'No Adobe library detected (check Activities tab first)';
+    }
+    
+    // Activity Delivery Time - ONLY if REAL activities were detected (not just API calls)
+    if (hasRealActivities && pagePerf.targetApiCalls && pagePerf.targetApiCalls.length > 0) {
+      const firstApiCall = pagePerf.targetApiCalls[0];
+      const isCached = firstApiCall.transferSize === 0;
+      const cacheLabel = isCached ? ' (cached ⚡)' : ' (network 🌐)';
+      
+      document.getElementById('activityDeliveryTime').textContent = `${firstApiCall.duration}ms${cacheLabel}`;
+      const deliveryBar = document.getElementById('activityDeliveryBar');
+      const maxTime = pagePerf.navigation.pageLoadTime || 5000;
+      const widthPercent = Math.min((firstApiCall.duration / maxTime) * 100, 100);
+      deliveryBar.style.width = `${widthPercent}%`;
+      
+      // Position based on start time
+      const startPercent = Math.min((firstApiCall.startTime / maxTime) * 100, 100);
+      deliveryBar.style.marginLeft = `${startPercent}%`;
+    } else if (!hasRealActivities && pagePerf.targetApiCalls && pagePerf.targetApiCalls.length > 0) {
+      // API call happened but NO activities delivered
+      document.getElementById('activityDeliveryTime').textContent = 'API call made but no activities delivered';
+      console.warn('⚠️ Target API call detected but no activities delivered. Response may have been empty or no matching activities.');
+    } else {
+      document.getElementById('activityDeliveryTime').textContent = 'No Target API calls detected';
+    }
+    
+    // Flicker Duration - ONLY if REAL activities were delivered
+    const flickerDuration = hasRealActivities ? this.estimateFlickerDuration(pagePerf, null) : null;
+    
+    if (!hasRealActivities) {
+      document.getElementById('flickerDuration').textContent = 'No activities delivered';
+      console.log('ℹ️ FLICKER: No Target activities detected, cannot calculate flicker');
+    } else if (flickerDuration !== null) {
+      if (flickerDuration === 0) {
+        document.getElementById('flickerDuration').textContent = '0ms (No flicker! ✅)';
+        const flickerBar = document.getElementById('flickerDurationBar');
+        flickerBar.style.width = '0%';
+        flickerBar.style.background = 'linear-gradient(90deg, #10b981 0%, #059669 100%)';
+      } else {
+        document.getElementById('flickerDuration').textContent = `${flickerDuration}ms`;
+        const flickerBar = document.getElementById('flickerDurationBar');
+        const maxTime = pagePerf.navigation.pageLoadTime || 5000;
+        const widthPercent = Math.min((flickerDuration / maxTime) * 100, 100);
+        flickerBar.style.width = `${widthPercent}%`;
+        
+        // Color code based on severity
+        if (flickerDuration > 500) {
+          flickerBar.style.background = 'linear-gradient(90deg, #dc2626 0%, #b91c1c 100%)';
+        } else if (flickerDuration > 300) {
+          flickerBar.style.background = 'linear-gradient(90deg, #f59e0b 0%, #d97706 100%)';
+        } else {
+          flickerBar.style.background = 'linear-gradient(90deg, #10b981 0%, #059669 100%)';
+        }
+      }
+    } else {
+      document.getElementById('flickerDuration').textContent = 'Cannot calculate';
+    }
+    
+    // Detailed Metrics
+    document.getElementById('dnsTime').textContent = 
+      pagePerf.navigation.dnsTime ? `${Math.round(pagePerf.navigation.dnsTime)}ms` : 'N/A';
+    
+    document.getElementById('tcpTime').textContent = 
+      pagePerf.navigation.tcpTime ? `${Math.round(pagePerf.navigation.tcpTime)}ms` : 'N/A';
+    
+    document.getElementById('requestTime').textContent = 
+      pagePerf.navigation.requestTime ? `${Math.round(pagePerf.navigation.requestTime)}ms` : 'N/A';
+    
+    document.getElementById('responseTime').textContent = 
+      pagePerf.navigation.responseTime ? `${Math.round(pagePerf.navigation.responseTime)}ms` : 'N/A';
+    
+    document.getElementById('domInteractive').textContent = 
+      pagePerf.navigation.domInteractive ? `${Math.round(pagePerf.navigation.domInteractive)}ms` : 'N/A';
+    
+    document.getElementById('domComplete').textContent = 
+      pagePerf.navigation.domComplete ? `${Math.round(pagePerf.navigation.domComplete)}ms` : 'N/A';
+  }
+
+  populateTimingTable(timingEvents) {
+    const tableBody = document.getElementById('timingTableBody');
+    
+    if (timingEvents.length === 0) {
+      tableBody.innerHTML = '<tr><td colspan="4" class="no-timing-data">No timing data available</td></tr>';
+      return;
+    }
+    
+    const rows = timingEvents.map((event, index) => {
+      const cacheIndicator = event.cached === true ? '<span style="color: #059669; font-size: 11px; margin-left: 8px;">⚡ cached</span>' : 
+                            event.cached === false ? '<span style="color: #dc2626; font-size: 11px; margin-left: 8px;">🌐 network</span>' : '';
+      
+      return `
+      <tr>
+        <td>
+          <span class="timing-sequence">#${index + 1}</span>
+          ${event.name}${cacheIndicator}
+        </td>
+        <td><span class="timing-value">${this.formatTime(event.startTime)}</span></td>
+        <td><span class="timing-value">${this.formatTime(event.duration)}</span></td>
+        <td><span class="timing-value">${this.formatTime(event.endTime)}</span></td>
+      </tr>
+      `;
+    }).join('');
+    
+    tableBody.innerHTML = rows;
+  }
+
+  formatTime(ms) {
+    if (ms === null || ms === undefined) return 'N/A';
+    if (ms >= 1000) {
+      return `${(ms / 1000).toFixed(2)}s`;
+    }
+    return `${Math.round(ms)}ms`;
+  }
+
+  estimateFlickerDuration(pagePerf, targetTiming) {
+    // CORRECT Flicker Formula (Analytics Consultant Approved):
+    // Flicker = When Activity Applied (End Time) - When User First Saw Content (FCP)
+    //
+    // This represents how long user sees default/wrong content before Target applies personalization
+    
+    const fcp = pagePerf.paint.firstContentfulPaint;
+    
+    // MUST use REAL Target API call from Resource Timing API
+    if (!pagePerf.targetApiCalls || pagePerf.targetApiCalls.length === 0) {
+      console.warn('⚠️ FLICKER: No Target API calls detected in Resource Timing');
+      return null;
+    }
+    
+    const firstApiCall = pagePerf.targetApiCalls[0];
+    const activityDeliveredAt = firstApiCall.endTime; // When response received and content applied
+    
+    if (!fcp) {
+      console.warn('⚠️ FLICKER: First Contentful Paint not available');
+      return null;
+    }
+    
+    if (!activityDeliveredAt || activityDeliveredAt === 0) {
+      console.warn('⚠️ FLICKER: Activity delivery time not available');
+      return null;
+    }
+    
+    // If activity delivered BEFORE FCP, no flicker (ideal scenario)
+    if (activityDeliveredAt <= fcp) {
+      console.log('✅ FLICKER: Activity delivered before FCP - no flicker!', {
+        fcp: fcp,
+        activityDelivered: activityDeliveredAt
+      });
+      return 0;
+    }
+    
+    // Flicker = Time between user seeing content and Target applying changes
+    const flickerDuration = Math.round(activityDeliveredAt - fcp);
+    
+    console.log('📊 FLICKER CALCULATION:', {
+      formula: 'Activity End Time - First Contentful Paint',
+      fcp: `${fcp}ms (when user first saw content)`,
+      activityDelivered: `${activityDeliveredAt}ms (when Target applied)`,
+      flickerDuration: `${flickerDuration}ms (how long user saw wrong content)`
+    });
+    
+    return flickerDuration;
+  }
+
+  generatePerformanceAnalytics(pagePerf, detectedActivities = []) {
+    // Uses Resource Timing + validates against ACTUAL activities from Activities tab
+    const recommendations = [];
+    const hasRealActivities = detectedActivities && detectedActivities.length > 0;
+    
+    // Calculate flicker duration once at the top (used throughout function)
+    const flickerDuration = hasRealActivities ? this.estimateFlickerDuration(pagePerf, null) : null;
+    
+    // Critical: Warn if API calls but no activities
+    if (!hasRealActivities && pagePerf.targetApiCalls && pagePerf.targetApiCalls.length > 0) {
+      recommendations.push({
+        icon: '⚠️',
+        title: 'Target API Called But No Activities Delivered',
+        description: `${pagePerf.targetApiCalls.length} Target API call(s) detected, but no personalization activities were delivered. This could mean: no matching activities for this user, targeting rules didn't match, or activities are paused/ended.`,
+        severity: 'medium'
+      });
+    }
+    
+    // Check if Target API calls were cached (only if activities exist)
+    if (hasRealActivities) {
+      const hasCachedCalls = pagePerf.targetApiCalls && pagePerf.targetApiCalls.some(call => call.transferSize === 0);
+      if (hasCachedCalls) {
+        recommendations.push({
+          icon: '⚡',
+          title: 'Cached Target Response Detected',
+          description: 'Some Target API calls were served from cache. For real-world timing, test with cache disabled (Network tab → Disable cache) and reload.',
+          severity: 'medium'
+        });
+      }
+    }
+    
+    // Analyze page load time
+    const pageLoadTime = pagePerf.navigation.pageLoadTime;
+    if (pageLoadTime > 3000) {
+      recommendations.push({
+        icon: '⚠️',
+        title: 'Slow Page Load Detected',
+        description: `Page load time is ${Math.round(pageLoadTime)}ms. Consider optimizing server response time and reducing resource size.`,
+        severity: 'high'
+      });
+    } else if (pageLoadTime > 2000) {
+      recommendations.push({
+        icon: '⏱️',
+        title: 'Moderate Page Load Time',
+        description: `Page load time is ${Math.round(pageLoadTime)}ms. There's room for improvement.`,
+        severity: 'medium'
+      });
+    }
+    
+    // Analyze First Contentful Paint
+    const fcp = pagePerf.paint.firstContentfulPaint;
+    if (fcp > 2500) {
+      recommendations.push({
+        icon: '🎨',
+        title: 'High First Contentful Paint',
+        description: `FCP is ${fcp}ms. Users may experience a blank screen for too long. Consider using a loading indicator or reducing render-blocking resources.`,
+        severity: 'high'
+      });
+    }
+    
+    // Analyze Adobe Target Impact - ONLY if real activities were delivered
+    if (hasRealActivities && pagePerf.targetApiCalls && pagePerf.targetApiCalls.length > 0) {
+      const firstApiCall = pagePerf.targetApiCalls[0];
+      const callDuration = firstApiCall.duration;
+      const isCached = firstApiCall.transferSize === 0;
+      
+      if (isCached) {
+        recommendations.push({
+          icon: '⚡',
+          title: 'Target Response from Cache',
+          description: `Target activity was served from cache (${callDuration}ms). This is faster than typical network response. Test with cache disabled for real-world timing.`,
+          severity: 'low'
+        });
+      } else if (callDuration > 1000) {
+        recommendations.push({
+          icon: '🎯',
+          title: 'Slow Adobe Target Response',
+          description: `Target activity delivery took ${callDuration}ms over network. Consider using edge servers, reducing audience complexity, or implementing async delivery.`,
+          severity: 'high'
+        });
+      } else if (callDuration > 500) {
+        recommendations.push({
+          icon: '🎯',
+          title: 'Adobe Target Performance Notice',
+          description: `Target activity delivery took ${callDuration}ms over network. Monitor this metric to ensure consistent performance.`,
+          severity: 'medium'
+        });
+      } else {
+        recommendations.push({
+          icon: '✅',
+          title: 'Good Adobe Target Performance',
+          description: `Target activity delivered in ${callDuration}ms over network. This is within acceptable limits.`,
+          severity: 'low'
+        });
+      }
+      
+      // Check if library loaded before Target call
+      const targetLib = pagePerf.resources.find(r => 
+        r.isLibrary && (r.libraryType.includes('Target') || r.libraryType.includes('Web SDK') || r.libraryType.includes('Launch'))
+      );
+      if (targetLib && firstApiCall.startTime < targetLib.endTime) {
+        recommendations.push({
+          icon: '⚠️',
+          title: 'Timing Anomaly Detected',
+          description: `Target API call started at ${Math.round(firstApiCall.startTime)}ms before ${targetLib.libraryType} finished loading at ${Math.round(targetLib.endTime)}ms. This may indicate parallel resource loading or async library execution.`,
+          severity: 'medium'
+        });
+      }
+    }
+    
+    // Analyze Flicker Risk - using REAL Resource Timing (already calculated at top)
+    if (flickerDuration !== null) {
+      if (flickerDuration > 500) {
+        recommendations.push({
+          icon: '⚡',
+          title: 'High Flicker Risk',
+          description: `Estimated flicker duration is ${flickerDuration}ms. Implement prehiding snippet, use serverState for SSR, or consider async Target delivery.`,
+          severity: 'high'
+        });
+      } else if (flickerDuration > 300) {
+        recommendations.push({
+          icon: '⚡',
+          title: 'Moderate Flicker Risk',
+          description: `Estimated flicker duration is ${flickerDuration}ms. Consider optimizing prehiding timeout or using faster delivery methods.`,
+          severity: 'medium'
+        });
+      } else {
+        recommendations.push({
+          icon: '✨',
+          title: 'Low Flicker Risk',
+          description: `Estimated flicker duration is ${flickerDuration}ms. Content should appear smoothly to users.`,
+          severity: 'low'
+        });
+      }
+    }
+    
+    // Check if tag management library (Launch or Tealium) is slow
+    const tagLibrary = pagePerf.resources.find(r => r.isLibrary);
+    
+    if (tagLibrary && tagLibrary.duration > 1000) {
+      recommendations.push({
+        icon: '🏷️',
+        title: 'Tag Management Library Slow',
+        description: `${tagLibrary.libraryType} took ${tagLibrary.duration}ms to load. This container may include Target, Analytics, and other solutions. Consider reducing extensions or using async loading.`,
+        severity: 'high'
+      });
+    } else if (tagLibrary && tagLibrary.duration > 500) {
+      recommendations.push({
+        icon: '📦',
+        title: 'Tag Management Library Load Time',
+        description: `${tagLibrary.libraryType} took ${tagLibrary.duration}ms to load. Monitor this to ensure consistent performance.`,
+        severity: 'medium'
+      });
+    }
+    
+    // Display recommendations
+    this.displayRecommendations(recommendations);
+    
+    // Calculate and display impact scores - use flickerDuration already calculated at top
+    this.calculateImpactScores(pagePerf, flickerDuration, hasRealActivities);
+  }
+
+  displayRecommendations(recommendations) {
+    const analyticsContainer = document.getElementById('performanceAnalytics');
+    
+    if (recommendations.length === 0) {
+      analyticsContainer.innerHTML = `
+        <div class="analytics-placeholder">
+          <p>✅ No performance issues detected!</p>
+        </div>
+      `;
+      return;
+    }
+    
+    const html = `
+      <div class="recommendation-list">
+        ${recommendations.map(rec => `
+          <div class="recommendation-item">
+            <div class="recommendation-icon">${rec.icon}</div>
+            <div class="recommendation-content">
+              <div class="recommendation-title">${rec.title}</div>
+              <div class="recommendation-description">${rec.description}</div>
+              <span class="recommendation-severity ${rec.severity}">${rec.severity} priority</span>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+    
+    analyticsContainer.innerHTML = html;
+  }
+
+  calculateImpactScores(pagePerf, flickerDuration, hasRealActivities = false) {
+    // Calculate Target Overhead ONLY if real activities were delivered
+    const pageLoadTime = pagePerf.navigation.pageLoadTime || 1;
+    
+    // Use REAL API call duration from Resource Timing (but only if activities delivered)
+    let targetDuration = 0;
+    let isCached = false;
+    
+    if (hasRealActivities && pagePerf.targetApiCalls && pagePerf.targetApiCalls.length > 0) {
+      targetDuration = pagePerf.targetApiCalls[0].duration;
+      isCached = pagePerf.targetApiCalls[0].transferSize === 0;
+    }
+    
+    const targetOverhead = targetDuration > 0 ? Math.round((targetDuration / pageLoadTime) * 100) : 0;
+    
+    // Show overhead with cache indicator
+    const cacheNote = isCached ? ' (from cache ⚡)' : '';
+    document.getElementById('targetOverhead').textContent = targetOverhead > 0 ? `${targetOverhead}%${cacheNote}` : 'N/A';
+    
+    const overheadStatus = document.getElementById('targetOverheadStatus');
+    if (!hasRealActivities) {
+      overheadStatus.textContent = 'ℹ️ No Target activities delivered';
+      overheadStatus.className = 'impact-status';
+    } else if (targetOverhead === 0) {
+      overheadStatus.textContent = 'ℹ️ No Target API timing data';
+      overheadStatus.className = 'impact-status';
+    } else if (isCached) {
+      overheadStatus.textContent = '⚡ From cache - test with cache disabled';
+      overheadStatus.className = 'impact-status warning';
+    } else if (targetOverhead < 10) {
+      overheadStatus.textContent = '✅ Minimal Impact';
+      overheadStatus.className = 'impact-status good';
+    } else if (targetOverhead < 20) {
+      overheadStatus.textContent = '⚠️ Moderate Impact';
+      overheadStatus.className = 'impact-status warning';
+    } else {
+      overheadStatus.textContent = '❌ High Impact';
+      overheadStatus.className = 'impact-status critical';
+    }
+    
+    // Calculate Flicker Risk - ONLY if real activities delivered
+    const flickerStatus = document.getElementById('flickerRiskStatus');
+    
+    if (!hasRealActivities) {
+      document.getElementById('flickerRisk').textContent = 'N/A';
+      flickerStatus.textContent = 'ℹ️ No Target activities delivered';
+      flickerStatus.className = 'impact-status';
+    } else if (flickerDuration === null || flickerDuration === undefined) {
+      document.getElementById('flickerRisk').textContent = 'N/A';
+      flickerStatus.textContent = 'ℹ️ Cannot calculate';
+      flickerStatus.className = 'impact-status';
+    } else if (flickerDuration === 0) {
+      document.getElementById('flickerRisk').textContent = '0ms';
+      flickerStatus.textContent = '✅ No Flicker! (Perfect)';
+      flickerStatus.className = 'impact-status good';
+    } else {
+      document.getElementById('flickerRisk').textContent = `${flickerDuration}ms`;
+      
+      if (flickerDuration < 300) {
+        flickerStatus.textContent = '✅ Low Risk';
+        flickerStatus.className = 'impact-status good';
+      } else if (flickerDuration < 500) {
+        flickerStatus.textContent = '⚠️ Medium Risk';
+        flickerStatus.className = 'impact-status warning';
+      } else {
+        flickerStatus.textContent = '❌ High Risk';
+        flickerStatus.className = 'impact-status critical';
+      }
+    }
+    
+    // Calculate Optimization Score (0-100)
+    let score = 100;
+    
+    // Deduct for slow page load
+    if (pageLoadTime > 3000) score -= 30;
+    else if (pageLoadTime > 2000) score -= 15;
+    
+    // Deduct for high FCP
+    const fcp = pagePerf.paint.firstContentfulPaint;
+    if (fcp > 2500) score -= 20;
+    else if (fcp > 1800) score -= 10;
+    
+    // Deduct for slow Target
+    if (targetDuration > 1000) score -= 25;
+    else if (targetDuration > 500) score -= 10;
+    
+    // Deduct for flicker
+    if (flickerDuration > 500) score -= 25;
+    else if (flickerDuration > 300) score -= 15;
+    
+    score = Math.max(0, score);
+    
+    document.getElementById('optimizationScore').textContent = score;
+    const scoreStatus = document.getElementById('optimizationScoreStatus');
+    if (score >= 80) {
+      scoreStatus.textContent = '✅ Excellent';
+      scoreStatus.className = 'impact-status good';
+    } else if (score >= 60) {
+      scoreStatus.textContent = '⚠️ Good';
+      scoreStatus.className = 'impact-status warning';
+    } else {
+      scoreStatus.textContent = '❌ Needs Improvement';
+      scoreStatus.className = 'impact-status critical';
+    }
+  }
+
+  showPerformanceError(message) {
+    const analyticsContainer = document.getElementById('performanceAnalytics');
+    analyticsContainer.innerHTML = `
+      <div class="error-data">
+        <p>❌ ${message}</p>
+      </div>
+    `;
+  }
+
+  explainLibraryMatch(url) {
+    const lowerUrl = url.toLowerCase();
+    
+    if (lowerUrl.includes('assets.adobedtm.com') && lowerUrl.includes('launch-')) {
+      return 'URL contains "assets.adobedtm.com" AND "launch-" → Adobe Launch/Tags';
+    }
+    if (lowerUrl.includes('tags.tiqcdn.com') || lowerUrl.includes('utag.js')) {
+      return 'URL contains "tags.tiqcdn.com" or "utag.js" → Tealium iQ Tag Management';
+    }
+    return 'Not a tag management library';
+  }
+
+  explainApiCallMatch(url) {
+    const lowerUrl = url.toLowerCase();
+    
+    if (lowerUrl.includes('/ee/v1/interact') || lowerUrl.includes('/ee/or2/v1/interact')) {
+      return 'URL contains "/ee/v1/interact" → Adobe Edge Network (Target via Web SDK)';
+    }
+    if (lowerUrl.includes('demdex.net') && lowerUrl.includes('/interact')) {
+      return 'URL contains "demdex.net/interact" → Adobe Edge Network (Target via Web SDK)';
+    }
+    if (lowerUrl.includes('adobedc.net') && lowerUrl.includes('/interact')) {
+      return 'URL contains "adobedc.net/interact" → Adobe Edge Network (Target via Web SDK)';
+    }
+    return 'Unknown API pattern';
+  }
+
+  escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+}
+
+// Initialize
+document.addEventListener('DOMContentLoaded', () => {
+  window.popup = new TargetPopup();
+  window.popup.init();
+});

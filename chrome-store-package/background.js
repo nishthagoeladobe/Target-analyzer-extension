@@ -5,6 +5,8 @@ class AdobeTargetDebugger {
     this.pendingRequests = new Map(); // requestId -> request info
     this.debuggerCancelledTabs = new Map(); // tabId -> timestamp when user cancelled debugger
     this.autoDebuggerDisabled = new Set(); // tabs where auto-debugger was disabled by user action
+    this.performanceData = new Map(); // tabId -> performance metrics
+    this.flickerTestData = new Map(); // tabId -> { withSnippet: {}, withoutSnippet: {} }
     
     this.init();
   }
@@ -83,6 +85,39 @@ class AdobeTargetDebugger {
       
       console.log('✅ DEBUGGER: Cleanup completed for tab:', tabId);
     });
+
+    // Listen for flicker test state changes
+    chrome.storage.onChanged.addListener((changes, namespace) => {
+      if (namespace === 'local' && changes.flickerTestState) {
+        console.log('🧪 FLICKER TEST: State changed:', changes.flickerTestState.newValue);
+      }
+    });
+
+    // Listen for page load complete to collect flicker test metrics
+    chrome.webNavigation.onCompleted.addListener(async (details) => {
+      if (details.frameId === 0) { // Main frame only
+        // Check if this is during a flicker test
+        const testState = await chrome.storage.local.get(['flickerTestState', 'flickerTestTabId']);
+        if (testState.flickerTestState && testState.flickerTestTabId === details.tabId) {
+          console.log('🧪 FLICKER TEST: Page loaded during test, re-enabling Network monitoring...');
+          
+          // Re-enable Network domain after page reload (critical for Target detection!)
+          try {
+            if (this.debuggingSessions.has(details.tabId)) {
+              await chrome.debugger.sendCommand({ tabId: details.tabId }, 'Network.enable');
+              console.log('✅ FLICKER TEST: Network monitoring re-enabled');
+            } else {
+              console.warn('⚠️ FLICKER TEST: Debugger not attached! Re-attaching...');
+              await this.startDebugging(details.tabId, 'flicker_test');
+            }
+          } catch (e) {
+            console.error('❌ FLICKER TEST: Error re-enabling Network:', e);
+          }
+        }
+        
+        await this.collectFlickerTestMetrics(details.tabId);
+      }
+    });
   }
 
   async handleMessage(message, sender, sendResponse) {
@@ -115,6 +150,30 @@ class AdobeTargetDebugger {
           isDebugging, 
           debuggerDisabled: isDisabled 
         });
+        break;
+
+      case 'GET_PERFORMANCE':
+        console.log('⚡ DEBUGGER: Getting performance data for tab:', tabId);
+        const perfData = this.performanceData.get(tabId) || null;
+        sendResponse({ performanceData: perfData });
+        break;
+
+      case 'COLLECT_FLICKER_METRICS':
+        console.log('📨 DEBUGGER: Manual flicker metrics collection requested for tab:', tabId);
+        this.collectFlickerTestMetrics(tabId).then(() => {
+          sendResponse({ success: true });
+        }).catch(error => {
+          console.error('❌ Error collecting flicker metrics:', error);
+          sendResponse({ success: false, error: error.message });
+        });
+        return true; // Keep channel open for async response
+
+      case 'CLEAR_FLICKER_TEST_DATA':
+        console.log('🧹 FLICKER TEST: Clearing test data for tab:', tabId);
+        if (this.flickerTestData.has(tabId)) {
+          this.flickerTestData.delete(tabId);
+        }
+        sendResponse({ success: true });
         break;
 
       case 'CLEAR_ACTIVITIES':
@@ -413,6 +472,43 @@ class AdobeTargetDebugger {
       implementationType: pendingRequest.implementationType
     });
 
+    // Track performance timing for Adobe Target delivery
+    const activityDeliveryTime = Date.now();
+    this.updatePerformanceData(tabId, {
+      activityDeliveryTimestamp: activityDeliveryTime,
+      targetCallDuration: activityDeliveryTime - pendingRequest.timestamp
+    });
+
+    // CRITICAL: Check if we're in a flicker test - store timing for current test phase
+    const testState = await chrome.storage.local.get(['flickerTestState', 'flickerTestTabId']);
+    
+    console.log('🔍 FLICKER TEST: Checking test state:', {
+      currentState: testState.flickerTestState,
+      expectedTab: testState.flickerTestTabId,
+      actualTab: tabId,
+      match: testState.flickerTestState && testState.flickerTestTabId === tabId
+    });
+    
+    if (testState.flickerTestState && testState.flickerTestTabId === tabId) {
+      console.log('✅ FLICKER TEST: Target call detected during test:', testState.flickerTestState);
+      
+      if (!this.flickerTestData.has(tabId)) {
+        this.flickerTestData.set(tabId, {});
+      }
+      
+      const testData = this.flickerTestData.get(tabId);
+      const phaseKey = testState.flickerTestState === 'test_with_snippet' ? 'withSnippetTargetTime' : 'withoutSnippetTargetTime';
+      testData[phaseKey] = activityDeliveryTime;
+      
+      console.log(`✅ FLICKER TEST: Stored Target timing for ${testState.flickerTestState}:`, {
+        phaseKey,
+        timestamp: activityDeliveryTime,
+        flickerTestData: testData
+      });
+    } else {
+      console.log('⚠️ FLICKER TEST: Not in a flicker test or tab mismatch, Target timing NOT stored');
+    }
+
     try {
       // Get the response body
       const response = await chrome.debugger.sendCommand(
@@ -590,11 +686,18 @@ class AdobeTargetDebugger {
     try {
       const responseData = JSON.parse(responseBody);
       console.log('🔍 DEBUGGER: Parsed alloy.js response:', responseData);
+      console.log('🔍 DEBUGGER: Response handle array:', responseData.handle);
+      
+      let activitiesFound = 0;
       
       // Extract activities from alloy.js interact response
       if (responseData.handle && Array.isArray(responseData.handle)) {
         responseData.handle.forEach((handleItem, handleIndex) => {
+          console.log(`🔍 DEBUGGER: Processing handle item type: "${handleItem.type}"`);
+          
+          // Handle personalization:decisions (standard)
           if (handleItem.type === 'personalization:decisions' && handleItem.payload) {
+            console.log('  ✅ Found personalization:decisions with', handleItem.payload.length, 'decisions');
             handleItem.payload.forEach((decision, decisionIndex) => {
               if (decision.items && decision.items.length > 0) {
                 decision.items.forEach((item, itemIndex) => {
@@ -607,11 +710,20 @@ class AdobeTargetDebugger {
                     `${handleIndex}-${decisionIndex}-${itemIndex}`
                   );
                   this.storeActivity(tabId, activity);
+                  activitiesFound++;
                 });
               }
             });
           }
         });
+      }
+      
+      console.log(`🔍 DEBUGGER: Total activities created from alloy.js response: ${activitiesFound}`);
+      
+      // If no activities found but response exists, log full response for debugging
+      if (activitiesFound === 0) {
+        console.warn('⚠️ DEBUGGER: No activities extracted from alloy.js response!');
+        console.log('Full response structure:', JSON.stringify(responseData, null, 2));
       }
       
     } catch (error) {
@@ -837,7 +949,432 @@ class AdobeTargetDebugger {
 
   clearTabActivities(tabId) {
     this.activities.delete(tabId);
-    console.log('🧹 DEBUGGER: Cleared activities for tab:', tabId);
+    this.performanceData.delete(tabId);
+    console.log('🧹 DEBUGGER: Cleared activities and performance data for tab:', tabId);
+  }
+
+  updatePerformanceData(tabId, data) {
+    if (!this.performanceData.has(tabId)) {
+      this.performanceData.set(tabId, {
+        libraryLoadTimestamp: null,
+        activityDeliveryTimestamp: null,
+        targetCallDuration: null,
+        firstTargetCall: null,
+        totalTargetCalls: 0
+      });
+    }
+    
+    const perfData = this.performanceData.get(tabId);
+    
+    // Update with new data
+    Object.assign(perfData, data);
+    
+    // Track first Target call timing
+    if (!perfData.firstTargetCall && data.activityDeliveryTimestamp) {
+      perfData.firstTargetCall = data.activityDeliveryTimestamp;
+    }
+    
+    // Increment total calls
+    if (data.activityDeliveryTimestamp) {
+      perfData.totalTargetCalls++;
+    }
+    
+    console.log('⚡ DEBUGGER: Updated performance data for tab:', tabId, perfData);
+  }
+
+  /* ========================================
+     FLICKER TEST METHODS
+     ======================================== */
+
+  async collectFlickerTestMetrics(tabId) {
+    try {
+      // Check if we're in a flicker test
+      const testState = await chrome.storage.local.get(['flickerTestState', 'flickerTestTabId']);
+      
+      console.log('🔍 FLICKER TEST: collectFlickerTestMetrics called for tabId:', tabId);
+      console.log('🔍 FLICKER TEST: Current test state:', testState);
+      
+      if (!testState.flickerTestState || testState.flickerTestTabId !== tabId) {
+        console.warn('⚠️ FLICKER TEST: Skipping collection - not in test or tab mismatch');
+        console.warn('   - flickerTestState:', testState.flickerTestState);
+        console.warn('   - Expected Tab ID:', testState.flickerTestTabId);
+        console.warn('   - Current Tab ID:', tabId);
+        console.warn('   - State exists?', !!testState.flickerTestState);
+        console.warn('   - Tab ID matches?', testState.flickerTestTabId === tabId);
+        
+        // Dump ALL storage to debug
+        const allStorage = await chrome.storage.local.get(null);
+        console.warn('   - FULL STORAGE:', allStorage);
+        
+        return; // Not in a flicker test for this tab
+      }
+
+      console.log('🧪 FLICKER TEST: Collecting metrics for state:', testState.flickerTestState);
+
+      // Wait for page to load and Target to complete
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      // Collect performance metrics using scripting API
+      console.log('🔍 FLICKER TEST: About to execute script on tab:', tabId);
+      
+      let result;
+      try {
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: tabId },
+          func: () => {
+            console.log('🔍 FLICKER TEST: Starting performance measurement...');
+          
+          const perfData = window.performance;
+          
+          // Get paint metrics
+          const paintEntries = perfData.getEntriesByType('paint');
+          console.log('🎨 FLICKER TEST: Paint entries:', paintEntries.map(p => ({ name: p.name, startTime: p.startTime })));
+          
+          // Get FCP (First Contentful Paint)
+          const fcpEntry = paintEntries.find(entry => entry.name === 'first-contentful-paint');
+          const fcp = fcpEntry ? Math.round(fcpEntry.startTime) : null;
+          
+          // Get page load time using MODERN Navigation Timing API Level 2
+          let pageLoad = null;
+          const navEntries = perfData.getEntriesByType('navigation');
+          
+          if (navEntries && navEntries.length > 0) {
+            const navEntry = navEntries[0];
+            pageLoad = navEntry.loadEventEnd > 0 ? Math.round(navEntry.loadEventEnd) : null;
+            console.log('📊 FLICKER TEST: Navigation timing (modern):', {
+              loadEventEnd: navEntry.loadEventEnd,
+              domContentLoadedEventEnd: navEntry.domContentLoadedEventEnd,
+              responseEnd: navEntry.responseEnd
+            });
+          } else {
+            // Fallback to deprecated API if modern one not available
+            const navTiming = perfData.timing;
+            if (navTiming && navTiming.loadEventEnd > 0 && navTiming.navigationStart > 0) {
+              pageLoad = Math.round(navTiming.loadEventEnd - navTiming.navigationStart);
+            }
+            console.log('📊 FLICKER TEST: Navigation timing (legacy):', {
+              loadEventEnd: navTiming?.loadEventEnd,
+              navigationStart: navTiming?.navigationStart,
+              calculated: pageLoad
+            });
+          }
+          
+          // Get ALL resources for debugging
+          const allResources = perfData.getEntriesByType('resource');
+          console.log('🔍 FLICKER TEST: Total resources loaded:', allResources.length);
+          
+          // Get Target API call timing - ULTRA COMPREHENSIVE DETECTION
+          console.log('🔍 FLICKER TEST: Scanning all resources for Target patterns...');
+          
+          const targetCalls = allResources.filter(r => {
+            const url = r.name.toLowerCase();
+            
+            // Check for interact calls (alloy.js / Web SDK) - ALL patterns
+            const isInteract = url.includes('/ee/v1/interact') || 
+                              url.includes('/ee/v2/interact') ||
+                              url.includes('/ee/or2/v1/interact') ||
+                              url.includes('adobedc.demdex.net/ee/') ||
+                              url.includes('edge.adobedc.net/ee/') ||
+                              (url.includes('/ee/') && url.includes('interact'));
+            
+            // Check for delivery calls (at.js) - ALL patterns
+            const isDelivery = (url.includes('tt.omtrdc.net') && url.includes('/delivery')) ||
+                              (url.includes('tt.omtrdc.net') && url.includes('/rest/v1/delivery')) ||
+                              (url.includes('/rest/v1/delivery') && url.includes('client=')) ||
+                              (url.includes('mboxedge') && url.includes('/delivery'));
+            
+            const matched = isInteract || isDelivery;
+            
+            if (matched) {
+              console.log('✅ FLICKER TEST: Matched Target URL:', {
+                url: r.name.substring(0, 120),
+                type: isInteract ? 'interact' : 'delivery',
+                startTime: Math.round(r.startTime),
+                responseEnd: Math.round(r.responseEnd),
+                duration: Math.round(r.duration)
+              });
+            }
+            
+            return matched;
+          });
+          
+          console.log('🎯 FLICKER TEST: Total Target API calls found:', targetCalls.length);
+          
+          if (targetCalls.length === 0) {
+            // Enhanced debugging - show ALL URLs with adobe/target/omtrdc
+            console.warn('⚠️ FLICKER TEST: NO Target API calls found!');
+            console.log('🔍 FLICKER TEST: Searching for ANY adobe-related URLs...');
+            
+            const adobeUrls = allResources
+              .filter(r => {
+                const url = r.name.toLowerCase();
+                return url.includes('adobe') || url.includes('target') || 
+                       url.includes('omtrdc') || url.includes('demdex') ||
+                       url.includes('tt.') || url.includes('edge');
+              })
+              .map(r => ({
+                url: r.name.substring(0, 200),
+                startTime: Math.round(r.startTime),
+                responseEnd: Math.round(r.responseEnd)
+              }));
+            
+            console.log('🔍 FLICKER TEST: Adobe-related URLs found:', adobeUrls.length);
+            adobeUrls.forEach((item, index) => {
+              console.log(`  ${index + 1}. ${item.url}`);
+            });
+          }
+          
+          // Calculate activity time based on number of calls
+          let activityTime = null;
+          let earliestActivity = null;
+          let latestActivity = null;
+          
+          if (targetCalls.length > 0) {
+            // Get all activity delivery times
+            const activityTimes = targetCalls.map(c => Math.round(c.responseEnd));
+            earliestActivity = Math.min(...activityTimes);
+            latestActivity = Math.max(...activityTimes);
+            
+            // For flicker calculation, use LATEST activity (when all changes are complete)
+            // This represents when the user finally sees the FINAL personalized state
+            activityTime = latestActivity;
+            
+            console.log('📊 FLICKER TEST: Activity delivery analysis:', {
+              totalApiCalls: targetCalls.length,
+              earliestActivity: earliestActivity + 'ms',
+              latestActivity: latestActivity + 'ms',
+              activitySpread: (latestActivity - earliestActivity) + 'ms',
+              allDeliveryTimes: activityTimes
+            });
+            
+            if (targetCalls.length > 1) {
+              console.log(`⚠️ FLICKER TEST: Multiple activities detected (${targetCalls.length} API calls)!`);
+              console.log('   Using LATEST delivery time for flicker calculation (when all personalization complete).');
+            }
+          }
+          
+          // Calculate flicker (Activity Applied - FCP)
+          const flicker = (activityTime && fcp) ? Math.max(0, activityTime - fcp) : null;
+          
+          console.log('📊 FLICKER TEST: Calculated metrics:', {
+            fcp,
+            activityTime,
+            flicker,
+            pageLoad
+          });
+          
+          return {
+            fcp,
+            pageLoad,
+            activityTime,
+            flicker,
+            targetCallsFound: targetCalls.length,
+            earliestActivity,
+            latestActivity
+          };
+        }
+        });
+        
+        console.log('✅ FLICKER TEST: Script execution completed, results:', results);
+        
+        if (!results || results.length === 0) {
+          console.error('❌ FLICKER TEST: No results returned from script execution');
+          return;
+        }
+        
+        result = results[0];
+        
+        if (!result || !result.result) {
+          console.error('❌ FLICKER TEST: Result object is missing or empty:', result);
+          return;
+        }
+        
+      } catch (scriptError) {
+        console.error('❌ FLICKER TEST: Script execution failed:', scriptError);
+        console.error('   Tab ID:', tabId);
+        console.error('   Error details:', scriptError.message);
+        return;
+      }
+
+      const metrics = result.result;
+      console.log('📊 FLICKER TEST: Collected metrics from window.performance:', metrics);
+      
+      if (!metrics) {
+        console.error('❌ FLICKER TEST: Metrics object is null or undefined');
+        return;
+      }
+
+      // CRITICAL FIX: Use debugger timing if available (more reliable than window.performance)
+      const testData = this.flickerTestData.get(tabId);
+      const targetTimeKey = testState.flickerTestState === 'test_with_snippet' ? 'withSnippetTargetTime' : 'withoutSnippetTargetTime';
+      const debuggerTargetTime = testData?.[targetTimeKey];
+      
+      if (debuggerTargetTime) {
+        // Get page navigation start time
+        const navTiming = await chrome.scripting.executeScript({
+          target: { tabId: tabId },
+          func: () => {
+            const navEntries = window.performance.getEntriesByType('navigation');
+            if (navEntries && navEntries.length > 0) {
+              // Modern API: return absolute timestamp of navigation start
+              return performance.timeOrigin;
+            }
+            // Fallback: legacy API
+            return window.performance.timing.navigationStart;
+          }
+        });
+        
+        const pageStartTime = navTiming[0].result;
+        const relativeActivityTime = debuggerTargetTime - pageStartTime;
+        
+        metrics.activityTime = Math.round(relativeActivityTime);
+        metrics.flicker = (metrics.activityTime && metrics.fcp) ? Math.max(0, metrics.activityTime - metrics.fcp) : null;
+        
+        console.log('✅ FLICKER TEST: Used debugger timing (RELIABLE):', {
+          debuggerAbsoluteTime: debuggerTargetTime,
+          pageStartTime: pageStartTime,
+          calculatedActivityTime: metrics.activityTime,
+          fcp: metrics.fcp,
+          calculatedFlicker: metrics.flicker
+        });
+      } else {
+        console.warn('⚠️ FLICKER TEST: No debugger timing available for this phase. Activity detection may have failed.');
+      }
+
+      // CRITICAL VALIDATION: Check if REAL activities exist (not just API calls)
+      const realActivities = this.activities.get(tabId) || [];
+      const hasRealActivities = realActivities.length > 0;
+      
+      console.log('🔍 FLICKER TEST: Activity validation:', {
+        apiCallsDetected: metrics.targetCallsFound,
+        realActivitiesDetected: realActivities.length,
+        hasRealActivities: hasRealActivities
+      });
+      
+      // If no real activities, set activity time to null (even if API calls were detected)
+      if (!hasRealActivities) {
+        console.warn('⚠️ FLICKER TEST: API calls detected but NO actual activities delivered!');
+        console.warn('   Setting activityTime and flicker to null');
+        metrics.activityTime = null;
+        metrics.flicker = null;
+      }
+
+      console.log('📊 FLICKER TEST: Final metrics:', metrics);
+
+      // Store metrics based on test state
+      if (testState.flickerTestState === 'test_with_snippet') {
+        // First test (WITH snippet)
+        if (!this.flickerTestData.has(tabId)) {
+          this.flickerTestData.set(tabId, {});
+        }
+        
+        // Check if we already collected this phase (prevent duplicate collection)
+        const testData = this.flickerTestData.get(tabId);
+        if (testData.withSnippet) {
+          console.log('⚠️ FLICKER TEST: WITH snippet metrics already collected, skipping duplicate');
+          return;
+        }
+        
+        testData.withSnippet = metrics;
+        console.log('✅ FLICKER TEST: Stored WITH snippet metrics');
+        
+      } else if (testState.flickerTestState === 'test_without_snippet') {
+        // Second test (WITHOUT snippet)
+        
+        // Check if we already have complete results saved (prevent overwriting)
+        const existingResults = await chrome.storage.local.get(['flickerTestResults']);
+        if (existingResults.flickerTestResults?.withSnippet && existingResults.flickerTestResults?.withoutSnippet) {
+          console.log('⚠️ FLICKER TEST: Complete results already saved, skipping duplicate collection');
+          return;
+        }
+        
+        if (!this.flickerTestData.has(tabId)) {
+          this.flickerTestData.set(tabId, {});
+        }
+        
+        // Check if we already collected this phase (prevent duplicate collection)
+        const testData = this.flickerTestData.get(tabId);
+        if (testData.withoutSnippet) {
+          console.log('⚠️ FLICKER TEST: WITHOUT snippet metrics already collected in memory, skipping duplicate');
+          return;
+        }
+        
+        testData.withoutSnippet = metrics;
+        console.log('✅ FLICKER TEST: Stored WITHOUT snippet metrics');
+        
+        // Both tests complete - save results with tab info
+        const finalResults = this.flickerTestData.get(tabId);
+        
+        // Get current tab URL for validation
+        let tabUrl = '';
+        try {
+          const tab = await chrome.tabs.get(tabId);
+          tabUrl = tab.url || '';
+        } catch (error) {
+          console.warn('Could not get tab URL:', error);
+        }
+        
+        await chrome.storage.local.set({ 
+          flickerTestResults: finalResults,
+          flickerTestTabId: tabId,
+          flickerTestUrl: tabUrl
+        });
+        console.log('🎉 FLICKER TEST: Both tests complete, results saved:', finalResults);
+        
+        // DON'T delete the map yet - wait for manual collection to verify
+        // The popup.js will clear it when displaying results
+      }
+
+    } catch (error) {
+      console.error('❌ FLICKER TEST: Error collecting metrics:', error);
+    }
+  }
+
+  async enableScriptBlocking(tabId) {
+    try {
+      // Enable Fetch domain to intercept requests
+      await chrome.debugger.sendCommand(
+        { tabId },
+        'Fetch.enable',
+        {
+          patterns: [{
+            urlPattern: '*',
+            requestStage: 'Response'
+          }]
+        }
+      );
+      console.log('🛡️ FLICKER TEST: Script blocking enabled for tab:', tabId);
+    } catch (error) {
+      console.error('❌ FLICKER TEST: Error enabling script blocking:', error);
+    }
+  }
+
+  async blockPrehidingSnippet(tabId, requestId, responseBody) {
+    try {
+      // Check if this is an HTML response with prehiding snippet
+      if (responseBody && typeof responseBody === 'string') {
+        if (responseBody.includes('prehiding') || 
+            responseBody.includes('body { opacity: 0') ||
+            responseBody.includes('body{opacity:0')) {
+          
+          console.log('🚫 FLICKER TEST: Prehiding snippet detected, blocking...');
+          
+          // Remove prehiding snippet from response
+          const modifiedBody = responseBody.replace(
+            /<script[^>]*>[\s\S]*?(prehiding|opacity.*0)[\s\S]*?<\/script>/gi,
+            '<!-- Prehiding snippet blocked by Flicker Test -->'
+          );
+          
+          return modifiedBody;
+        }
+      }
+      
+      return responseBody; // No modification needed
+      
+    } catch (error) {
+      console.error('❌ FLICKER TEST: Error blocking snippet:', error);
+      return responseBody;
+    }
   }
 }
 

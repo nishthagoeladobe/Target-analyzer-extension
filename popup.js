@@ -12,6 +12,9 @@ class TargetPopup {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       this.currentTabId = tab.id;
       
+      // Clear stale snippet test results on init
+      await this.clearStaleSnippetResults();
+      
       // Bind events first
       this.bindEvents();
       
@@ -33,6 +36,34 @@ class TargetPopup {
       
     } catch (error) {
       this.showError('Failed to initialize extension');
+    }
+  }
+
+  async clearStaleSnippetResults() {
+    try {
+      const storage = await chrome.storage.local.get(['flickerTestResults', 'flickerTestTabId', 'flickerTestUrl', 'snippetTestWithActivities']);
+      
+      if (storage.flickerTestResults) {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        const currentUrl = tab.url;
+        const currentTabId = tab.id;
+        
+        // Check if results are for current tab/URL
+        const savedUrlBase = storage.flickerTestUrl ? storage.flickerTestUrl.split('?')[0].split('#')[0] : '';
+        const currentUrlBase = currentUrl ? currentUrl.split('?')[0].split('#')[0] : '';
+        
+        if (storage.flickerTestTabId !== currentTabId || savedUrlBase !== currentUrlBase) {
+          console.log('🧹 Clearing stale snippet test results from different page');
+          await chrome.storage.local.remove(['flickerTestResults', 'flickerTestTabId', 'flickerTestUrl']);
+        }
+      }
+      
+      // Clear activity context flags when popup opens (they're only valid for immediate transitions)
+      // The "Test Prehiding Snippet Impact" button will set them fresh before switching tabs
+      await chrome.storage.local.remove(['snippetTestWithActivities', 'snippetTestActivitiesCount']);
+      console.log('🧹 Cleared activity context flags (will be reset if coming from Activities tab)');
+    } catch (error) {
+      console.error('Error clearing stale results:', error);
     }
   }
 
@@ -202,11 +233,90 @@ class TargetPopup {
       });
     }
 
+    // Analyze Target Performance button
+    const analyzePerfBtn = document.getElementById('analyzePerformance');
+    if (analyzePerfBtn) {
+      analyzePerfBtn.addEventListener('click', async () => {
+        const originalText = analyzePerfBtn.textContent;
+        analyzePerfBtn.textContent = '⏳ Analyzing...';
+        analyzePerfBtn.disabled = true;
+        
+        try {
+          await this.analyzeTargetPerformance();
+          this.switchTab('performance');
+        } catch (error) {
+          console.error('Error analyzing performance:', error);
+        } finally {
+          setTimeout(() => {
+            analyzePerfBtn.textContent = originalText;
+            analyzePerfBtn.disabled = false;
+          }, 500);
+        }
+      });
+    }
+
+    // Test Prehiding Snippet Impact button
+    const testSnippetBtn = document.getElementById('testSnippetImpact');
+    if (testSnippetBtn) {
+      testSnippetBtn.addEventListener('click', async () => {
+        const originalText = testSnippetBtn.textContent;
+        testSnippetBtn.textContent = '⏳ Preparing Test...';
+        testSnippetBtn.disabled = true;
+        
+        try {
+          // Store that we're testing with activities context
+          await chrome.storage.local.set({
+            snippetTestWithActivities: true,
+            snippetTestActivitiesCount: this.activities.length
+          });
+          
+          // Switch to snippet test tab
+          this.switchTab('snippettest');
+          
+          // Auto-detect snippet and show ready state
+          setTimeout(() => {
+            this.detectPrehidingSnippet();
+            this.showFlickerTestReady();
+          }, 300);
+          
+        } catch (error) {
+          console.error('Error preparing snippet test:', error);
+        } finally {
+          setTimeout(() => {
+            testSnippetBtn.textContent = originalText;
+            testSnippetBtn.disabled = false;
+          }, 500);
+        }
+      });
+    }
+
     // Excel download
     const downloadBtn = document.getElementById('copyAllActivities');
     if (downloadBtn) {
       downloadBtn.addEventListener('click', () => {
         this.downloadExcelReport();
+      });
+    }
+
+    // Performance manual refresh button - shows basic metrics even without activities
+    const refreshPerfBtn = document.getElementById('refreshPerformance');
+    if (refreshPerfBtn) {
+      refreshPerfBtn.addEventListener('click', async () => {
+        const originalText = refreshPerfBtn.textContent;
+        refreshPerfBtn.textContent = '⏳ Loading...';
+        refreshPerfBtn.disabled = true;
+        
+        try {
+          // Always collect basic page metrics (works without activities)
+          await this.loadBasicPageMetrics();
+        } catch (error) {
+          console.error('Error loading metrics:', error);
+        } finally {
+          setTimeout(() => {
+            refreshPerfBtn.textContent = originalText;
+            refreshPerfBtn.disabled = false;
+          }, 500);
+        }
       });
     }
 
@@ -217,6 +327,33 @@ class TargetPopup {
         this.submitErrorReport();
       });
     }
+
+    // Flicker Test - Run A/B Test
+    const runFlickerTestBtn = document.getElementById('runFlickerTest');
+    if (runFlickerTestBtn) {
+      runFlickerTestBtn.addEventListener('click', async () => {
+        await this.runFlickerTest();
+      });
+    }
+
+    // Flicker Test - Clear Cache
+    const clearCacheBtn = document.getElementById('clearCacheBtn');
+    if (clearCacheBtn) {
+      clearCacheBtn.addEventListener('click', async () => {
+        await this.clearCacheAndReload();
+      });
+    }
+
+    // Snippet Test Tab - Load saved results, auto-detect snippet and show ready state when tab opens
+    document.querySelector('[data-tab="snippettest"]')?.addEventListener('click', async () => {
+      setTimeout(async () => {
+        // Load saved results if they exist
+        await this.loadSavedSnippetTestResults();
+        
+        await this.showFlickerTestReady();
+        this.detectPrehidingSnippet();
+      }, 100);
+    });
   }
 
   async waitForActivitiesAfterReload() {
@@ -1100,11 +1237,1200 @@ This report was automatically generated by the Adobe Target Inspector Chrome Ext
     `).join('') + (modifications.length > 3 ? `<div class="more-modifications">+${modifications.length - 3} more</div>` : '');
   }
 
+  async loadBasicPageMetrics() {
+    // Load basic page metrics - works WITHOUT activities
+    console.log('📊 Loading basic page metrics (no activities required)');
+    
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => {
+          const data = {
+            navigation: {},
+            paint: {},
+            tagLibraries: [],
+            targetApiCalls: []
+          };
+          
+          const timing = window.performance?.timing;
+          if (timing) {
+            const navStart = timing.navigationStart;
+            data.navigation = {
+              pageLoadTime: timing.loadEventEnd - navStart,
+              domInteractive: timing.domInteractive - navStart,
+              domComplete: timing.domComplete - navStart,
+              dnsTime: timing.domainLookupEnd - timing.domainLookupStart,
+              tcpTime: timing.connectEnd - timing.connectStart,
+              requestTime: timing.responseStart - timing.requestStart,
+              responseTime: timing.responseEnd - timing.responseStart,
+              navigationStartTimestamp: navStart
+            };
+          }
+          
+          const paintEntries = window.performance?.getEntriesByType('paint') || [];
+          data.paint = {
+            firstPaint: paintEntries.find(e => e.name === 'first-paint')?.startTime || null,
+            firstContentfulPaint: paintEntries.find(e => e.name === 'first-contentful-paint')?.startTime || null
+          };
+          
+          const resources = window.performance?.getEntriesByType('resource') || [];
+          
+          // Tag libraries
+          data.tagLibraries = resources
+            .filter(r => {
+              const url = r.name.toLowerCase();
+              return (url.includes('assets.adobedtm.com') && url.includes('launch-')) ||
+                     url.includes('tags.tiqcdn.com') || url.includes('utag.js');
+            })
+            .map(r => ({
+              name: r.name,
+              type: r.name.toLowerCase().includes('adobedtm') ? 'Adobe Launch/Tags' : 'Tealium iQ',
+              startTime: Math.round(r.startTime),
+              duration: Math.round(r.duration),
+              endTime: Math.round(r.startTime + r.duration),
+              cached: r.transferSize === 0
+            }));
+          
+          // Target API calls - Support BOTH /interact AND /delivery
+          data.targetApiCalls = resources
+            .filter(r => {
+              const url = r.name.toLowerCase();
+              // alloy.js /interact calls
+              const isInteract = url.includes('/ee/v1/interact') || 
+                                url.includes('/ee/or2/v1/interact') ||
+                                (url.includes('demdex.net') && url.includes('/interact')) ||
+                                (url.includes('adobedc.net') && url.includes('/interact'));
+              // at.js /delivery calls
+              const isDelivery = url.includes('tt.omtrdc.net') && url.includes('/delivery');
+              
+              return isInteract || isDelivery;
+            })
+            .map(r => ({
+              name: r.name,
+              startTime: Math.round(r.startTime),
+              duration: Math.round(r.duration),
+              endTime: Math.round(r.startTime + r.duration),
+              transferSize: r.transferSize,
+              // Improved cache detection
+              cached: r.transferSize === 0 || r.transferSize < 100,
+              apiType: r.name.toLowerCase().includes('/interact') ? 'interact' : 'delivery'
+            }));
+          
+          return data;
+        }
+      });
+      
+      // Store with empty activities if none detected yet
+      this.performanceData = {
+        metrics: results[0].result,
+        activities: this.activities, // Use current activities (may be empty)
+        analyzedAt: Date.now()
+      };
+      
+      this.displayTargetPerformanceMetrics();
+      
+    } catch (error) {
+      console.error('Error loading basic metrics:', error);
+      this.showPerformanceInstructions();
+    }
+  }
+
+  async analyzeTargetPerformance() {
+    console.group('⚡ ANALYZING TARGET PERFORMANCE');
+    console.log('Activities detected:', this.activities.length);
+    
+    if (this.activities.length === 0) {
+      console.warn('No activities to analyze');
+      console.groupEnd();
+      this.showPerformanceInstructions();
+      return;
+    }
+    
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => {
+          const data = {
+            navigation: {},
+            paint: {},
+            tagLibraries: [],
+            targetApiCalls: []
+          };
+          
+          const timing = window.performance?.timing;
+          if (timing) {
+            const navStart = timing.navigationStart;
+            data.navigation = {
+              pageLoadTime: timing.loadEventEnd - navStart,
+              domInteractive: timing.domInteractive - navStart,
+              domComplete: timing.domComplete - navStart,
+              navigationStartTimestamp: navStart
+            };
+          }
+          
+          const paintEntries = window.performance?.getEntriesByType('paint') || [];
+          data.paint = {
+            firstPaint: paintEntries.find(e => e.name === 'first-paint')?.startTime || null,
+            firstContentfulPaint: paintEntries.find(e => e.name === 'first-contentful-paint')?.startTime || null
+          };
+          
+          const resources = window.performance?.getEntriesByType('resource') || [];
+          
+          // Tag libraries (Launch or Tealium)
+          data.tagLibraries = resources
+            .filter(r => {
+              const url = r.name.toLowerCase();
+              return (url.includes('assets.adobedtm.com') && url.includes('launch-')) ||
+                     url.includes('tags.tiqcdn.com') || url.includes('utag.js');
+            })
+            .map(r => ({
+              name: r.name,
+              type: r.name.toLowerCase().includes('adobedtm') ? 'Adobe Launch/Tags' : 'Tealium iQ',
+              startTime: Math.round(r.startTime),
+              duration: Math.round(r.duration),
+              endTime: Math.round(r.startTime + r.duration),
+              cached: r.transferSize === 0
+            }));
+          
+          // Target API calls - Support BOTH /interact AND /delivery
+          data.targetApiCalls = resources
+            .filter(r => {
+              const url = r.name.toLowerCase();
+              // alloy.js calls
+              const isInteract = url.includes('/ee/v1/interact') || 
+                                url.includes('/ee/or2/v1/interact') ||
+                                (url.includes('demdex.net') && url.includes('/interact')) ||
+                                (url.includes('adobedc.net') && url.includes('/interact'));
+              // at.js calls
+              const isDelivery = url.includes('tt.omtrdc.net') && url.includes('/delivery');
+              
+              return isInteract || isDelivery;
+            })
+            .map(r => ({
+              name: r.name,
+              startTime: Math.round(r.startTime),
+              duration: Math.round(r.duration),
+              endTime: Math.round(r.startTime + r.duration),
+              transferSize: r.transferSize,
+              // Better cache detection: transferSize === 0 OR very small (< 100 bytes)
+              cached: r.transferSize === 0 || r.transferSize < 100,
+              apiType: r.name.toLowerCase().includes('/interact') ? 'interact' : 'delivery'
+            }));
+          
+          return data;
+        }
+      });
+      
+      this.performanceData = {
+        metrics: results[0].result,
+        activities: this.activities,
+        analyzedAt: Date.now()
+      };
+      
+      console.log('✅ Analysis complete');
+      console.groupEnd();
+      
+      this.displayTargetPerformanceMetrics();
+      
+    } catch (error) {
+      console.error('Error:', error);
+      console.groupEnd();
+    }
+  }
+
+  displayTargetPerformanceMetrics() {
+    if (!this.performanceData) return;
+    
+    const m = this.performanceData.metrics;
+    const activities = this.performanceData.activities;
+    const hasActivities = activities && activities.length > 0;
+    
+    // Hide guidance banner when showing metrics
+    const guidanceBanner = document.getElementById('performanceGuidanceBanner');
+    if (guidanceBanner) {
+      guidanceBanner.style.display = 'none';
+    }
+    
+    console.group('📊 DISPLAYING PERFORMANCE WITH ACTIVITIES');
+    console.log('Total activities:', activities.length);
+    console.log('Activities:', activities.map(a => ({
+      name: a.name,
+      timestamp: a.timestamp,
+      time: new Date(a.timestamp).toLocaleTimeString()
+    })));
+    console.groupEnd();
+    
+    // Page metrics
+    document.getElementById('pageLoadTime').textContent = 
+      m.navigation.pageLoadTime ? `${Math.round(m.navigation.pageLoadTime)}ms` : 'N/A';
+    document.getElementById('firstPaint').textContent = 
+      m.paint.firstPaint ? `${Math.round(m.paint.firstPaint)}ms` : 'N/A';
+    document.getElementById('firstContentfulPaint').textContent = 
+      m.paint.firstContentfulPaint ? `${Math.round(m.paint.firstContentfulPaint)}ms` : 'N/A';
+    
+    // Detailed metrics
+    document.getElementById('dnsTime').textContent = 
+      m.navigation.dnsTime ? `${Math.round(m.navigation.dnsTime)}ms` : 'N/A';
+    document.getElementById('tcpTime').textContent = 
+      m.navigation.tcpTime ? `${Math.round(m.navigation.tcpTime)}ms` : 'N/A';
+    document.getElementById('requestTime').textContent = 
+      m.navigation.requestTime ? `${Math.round(m.navigation.requestTime)}ms` : 'N/A';
+    document.getElementById('responseTime').textContent = 
+      m.navigation.responseTime ? `${Math.round(m.navigation.responseTime)}ms` : 'N/A';
+    document.getElementById('domInteractive').textContent = 
+      m.navigation.domInteractive ? `${Math.round(m.navigation.domInteractive)}ms` : 'N/A';
+    document.getElementById('domComplete').textContent = 
+      m.navigation.domComplete ? `${Math.round(m.navigation.domComplete)}ms` : 'N/A';
+    
+    // POPULATE TIMING TABLE
+    const timingTable = document.getElementById('timingTableBody');
+    const events = [];
+    
+    // Add page events
+    if (m.paint.firstPaint) {
+      events.push({ name: '🎨 First Paint', start: 0, duration: Math.round(m.paint.firstPaint), end: Math.round(m.paint.firstPaint) });
+    }
+    if (m.paint.firstContentfulPaint) {
+      events.push({ name: '🎨 First Contentful Paint', start: 0, duration: Math.round(m.paint.firstContentfulPaint), end: Math.round(m.paint.firstContentfulPaint) });
+    }
+    
+    // Add tag library
+    const tagLib = m.tagLibraries[0];
+    if (tagLib) {
+      events.push({ name: `📦 ${tagLib.type}`, start: tagLib.startTime, duration: tagLib.duration, end: tagLib.endTime });
+      document.getElementById('libraryLoadTime').textContent = `${tagLib.duration}ms (${tagLib.type})`;
+    } else {
+      document.getElementById('libraryLoadTime').textContent = 'No tag library detected';
+    }
+    
+    // Add DOM events
+    if (m.navigation.domInteractive) {
+      events.push({ name: '📄 DOM Interactive', start: 0, duration: Math.round(m.navigation.domInteractive), end: Math.round(m.navigation.domInteractive) });
+    }
+    
+    // Add Target API ONLY if activities exist
+    const apiCall = m.targetApiCalls[0];
+    if (hasActivities && apiCall) {
+      // Log cache detection for debugging
+      console.log('🌐 TARGET API CACHE DETECTION:', {
+        url: apiCall.name,
+        apiType: apiCall.apiType,
+        transferSize: apiCall.transferSize + ' bytes',
+        isCached: apiCall.cached,
+        reason: apiCall.transferSize === 0 ? 'transferSize = 0 (browser disk cache)' :
+                apiCall.transferSize < 100 ? `transferSize = ${apiCall.transferSize} bytes (likely cached header/redirect)` :
+                `transferSize = ${apiCall.transferSize} bytes (real network call)`
+      });
+      
+      const cached = apiCall.cached ? ' ⚡ cached' : ' 🌐 network';
+      events.push({ name: `🎯 Target Activity Delivery${cached}`, start: apiCall.startTime, duration: apiCall.duration, end: apiCall.endTime });
+      
+      const label = apiCall.cached ? ' (cached ⚡)' : ' (network 🌐)';
+      document.getElementById('activityDeliveryTime').textContent = `${apiCall.duration}ms${label}`;
+      
+      // Show individual activities breakdown
+      this.displayIndividualActivities(activities, apiCall, m.paint.firstContentfulPaint);
+    } else if (apiCall && !hasActivities) {
+      document.getElementById('activityDeliveryTime').textContent = 'API call but no activities delivered';
+      this.hideActivitiesBreakdown();
+    } else {
+      document.getElementById('activityDeliveryTime').textContent = 'No Target activities detected';
+      this.hideActivitiesBreakdown();
+    }
+    
+    if (m.navigation.domComplete) {
+      events.push({ name: '✅ DOM Complete', start: 0, duration: Math.round(m.navigation.domComplete), end: Math.round(m.navigation.domComplete) });
+    }
+    
+    // Sort by start time, then by end time
+    events.sort((a, b) => a.start !== b.start ? a.start - b.start : a.end - b.end);
+    
+    // Populate table
+    if (events.length > 0 && timingTable) {
+      timingTable.innerHTML = events.map((e, i) => `
+        <tr>
+          <td><span class="timing-sequence">#${i + 1}</span> ${e.name}</td>
+          <td><span class="timing-value">${e.start}ms</span></td>
+          <td><span class="timing-value">${e.duration}ms</span></td>
+          <td><span class="timing-value">${e.end}ms</span></td>
+        </tr>
+      `).join('');
+    } else if (timingTable) {
+      timingTable.innerHTML = '<tr><td colspan="4" class="no-timing-data">No timing data available</td></tr>';
+    }
+    
+    // Flicker
+    const fcp = m.paint.firstContentfulPaint;
+    const activityEnd = apiCall?.endTime;
+    const flicker = (fcp && activityEnd && hasActivities) ? Math.max(0, activityEnd - fcp) : null;
+    
+    if (flicker !== null) {
+      document.getElementById('flickerDuration').textContent = `${Math.round(flicker)}ms`;
+    } else {
+      document.getElementById('flickerDuration').textContent = hasActivities ? 'N/A' : 'No activities detected';
+    }
+    
+    // Analytics
+    this.displayPerformanceAnalytics(m, activities, flicker);
+  }
+
+  displayPerformanceAnalytics(metrics, activities, flicker) {
+    const recs = [];
+    
+    if (activities.length === 0) {
+      recs.push({
+        icon: 'ℹ️',
+        title: 'No Target Activities Detected',
+        description: 'No personalization was delivered. Check Activities tab for details.',
+        severity: 'low'
+      });
+    }
+    
+    if (flicker && flicker > 500) {
+      recs.push({
+        icon: '⚡',
+        title: 'High Flicker Risk',
+        description: `${Math.round(flicker)}ms flicker detected. Consider prehiding snippet or server-side rendering.`,
+        severity: 'high'
+      });
+    }
+    
+    const tagLib = metrics.tagLibraries[0];
+    if (tagLib && tagLib.duration > 500) {
+      recs.push({
+        icon: '🏷️',
+        title: 'Slow Tag Library',
+        description: `${tagLib.type} took ${tagLib.duration}ms. Consider optimization.`,
+        severity: 'medium'
+      });
+    }
+    
+    const html = recs.length > 0 ? `<div class="recommendation-list">${recs.map(r => `
+      <div class="recommendation-item">
+        <div class="recommendation-icon">${r.icon}</div>
+        <div class="recommendation-content">
+          <div class="recommendation-title">${r.title}</div>
+          <div class="recommendation-description">${r.description}</div>
+          <span class="recommendation-severity ${r.severity}">${r.severity}</span>
+        </div>
+      </div>
+    `).join('')}</div>` : '<div class="analytics-placeholder"><p>✅ No performance issues detected!</p></div>';
+    
+    const container = document.getElementById('performanceAnalytics');
+    if (container) container.innerHTML = html;
+    
+    // Impact scores with FORMULAS shown
+    const pageLoad = metrics.navigation.pageLoadTime || 1;
+    const targetDuration = metrics.targetApiCalls[0]?.duration || 0;
+    const overhead = targetDuration > 0 ? Math.round((targetDuration / pageLoad) * 100) : 0;
+    
+    document.getElementById('targetOverhead').textContent = overhead > 0 ? `${overhead}%` : 'N/A';
+    document.getElementById('targetOverheadStatus').textContent = 
+      overhead === 0 ? 'ℹ️ No Target calls' :
+      overhead < 10 ? '✅ Minimal' : overhead < 20 ? '⚠️ Moderate' : '❌ High';
+    
+    // Show Target Overhead formula
+    const overheadFormula = document.getElementById('targetOverheadFormula');
+    if (overheadFormula) {
+      if (overhead > 0) {
+        overheadFormula.innerHTML = `
+          <strong>Formula:</strong><br>
+          (Target Duration / Page Load) × 100<br>
+          = (${targetDuration}ms / ${Math.round(pageLoad)}ms) × 100<br>
+          = <strong>${overhead}%</strong><br>
+          <br>
+          <em>What it means:</em> Target consumed ${overhead}% of total page load time
+        `;
+      } else {
+        overheadFormula.textContent = 'No Target API calls detected';
+      }
+    }
+    
+    document.getElementById('flickerRisk').textContent = flicker ? `${Math.round(flicker)}ms` : 'N/A';
+    document.getElementById('flickerRiskStatus').textContent = 
+      !flicker ? 'ℹ️ No flicker data' :
+      flicker === 0 ? '✅ No flicker' :
+      flicker < 300 ? '✅ Low' : flicker < 500 ? '⚠️ Medium' : '❌ High';
+    
+    // Show Flicker formula
+    const flickerFormula = document.getElementById('flickerFormula');
+    if (flickerFormula) {
+      if (flicker !== null && flicker !== undefined && activities.length > 0) {
+        const apiCall = metrics.targetApiCalls[0];
+        const fcp = metrics.paint.firstContentfulPaint;
+        flickerFormula.innerHTML = `
+          <strong>Formula:</strong><br>
+          Activity End Time - First Contentful Paint<br>
+          = ${apiCall.endTime}ms - ${Math.round(fcp)}ms<br>
+          = <strong>${Math.round(flicker)}ms</strong><br>
+          <br>
+          <em>What it means:</em> User saw wrong content for ${Math.round(flicker)}ms before Target personalized it
+        `;
+      } else {
+        flickerFormula.textContent = 'Requires activity detection (go to Activities tab)';
+      }
+    }
+    
+    const score = Math.max(0, 100 - (flicker > 500 ? 30 : 0) - (overhead > 20 ? 30 : 0));
+    document.getElementById('optimizationScore').textContent = score;
+    document.getElementById('optimizationScoreStatus').textContent = 
+      score >= 80 ? '✅ Excellent' : score >= 60 ? '⚠️ Good' : '❌ Needs work';
+    
+    // Show Optimization Score formula
+    const scoreFormula = document.getElementById('scoreFormula');
+    if (scoreFormula) {
+      const flickerDeduction = flicker > 500 ? 30 : flicker > 300 ? 15 : 0;
+      const overheadDeduction = overhead > 20 ? 30 : overhead > 10 ? 15 : 0;
+      
+      scoreFormula.innerHTML = `
+        <strong>Formula:</strong><br>
+        100 - Flicker Penalty - Overhead Penalty<br>
+        = 100 - ${flickerDeduction} - ${overheadDeduction}<br>
+        = <strong>${score}</strong><br>
+        <br>
+        <em>Penalties:</em><br>
+        • Flicker >500ms: -30 | 300-500ms: -15<br>
+        • Overhead >20%: -30 | 10-20%: -15
+      `;
+    }
+  }
+
+  displayIndividualActivities(activities, apiCall, fcp) {
+    const section = document.getElementById('activitiesBreakdownSection');
+    const container = document.getElementById('activitiesPerformanceBreakdown');
+    
+    if (!section || !container) return;
+    
+    // Update heading with count
+    const heading = section.querySelector('h3');
+    if (heading) {
+      heading.textContent = `🎯 Target Activities Performance (${activities.length} ${activities.length === 1 ? 'activity' : 'activities'})`;
+    }
+    
+    // Show section
+    section.style.display = 'block';
+    
+    // Create activity cards
+    const html = activities.map((activity, index) => {
+      // Calculate per-activity flicker (all activities delivered at same time in single API call)
+      const activityDeliveredAt = apiCall.endTime;
+      const flicker = fcp && activityDeliveredAt ? Math.max(0, activityDeliveredAt - fcp) : null;
+      const flickerStatus = !flicker ? 'N/A' : 
+                           flicker === 0 ? '✅ No flicker' :
+                           flicker < 300 ? '✅ Low' : 
+                           flicker < 500 ? '⚠️ Medium' : '❌ High';
+      
+      return `
+        <div class="activity-performance-card">
+          <div class="activity-perf-header">
+            <div class="activity-perf-name">
+              <span class="activity-number">#${index + 1}</span>
+              ${this.escapeHtml(activity.name)}
+            </div>
+            <span class="implementation-badge ${activity.implementationType.toLowerCase()}">${activity.implementationType}</span>
+          </div>
+          <div class="activity-perf-details">
+            <div class="perf-detail-row">
+              <span class="perf-detail-label">Experience:</span>
+              <span class="perf-detail-value">${this.escapeHtml(activity.experience)}</span>
+            </div>
+            <div class="perf-detail-row">
+              <span class="perf-detail-label">Delivered At:</span>
+              <span class="perf-detail-value">${activityDeliveredAt}ms (${new Date(activity.timestamp).toLocaleTimeString()})</span>
+            </div>
+            <div class="perf-detail-row">
+              <span class="perf-detail-label">API Call Duration:</span>
+              <span class="perf-detail-value">${apiCall.duration}ms ${apiCall.cached ? '⚡ cached' : '🌐 network'}</span>
+            </div>
+            <div class="perf-detail-row">
+              <span class="perf-detail-label">Flicker Impact:</span>
+              <span class="perf-detail-value flicker-${flicker > 500 ? 'high' : flicker > 300 ? 'medium' : 'low'}">${flicker ? `${Math.round(flicker)}ms ${flickerStatus}` : 'N/A'}</span>
+            </div>
+            ${flicker ? `
+            <div class="flicker-formula">
+              <small>Flicker = Activity Delivered (${activityDeliveredAt}ms) - FCP (${Math.round(fcp)}ms) = ${Math.round(flicker)}ms</small>
+            </div>
+            ` : ''}
+          </div>
+        </div>
+      `;
+    }).join('');
+    
+    container.innerHTML = html;
+  }
+
+  hideActivitiesBreakdown() {
+    const section = document.getElementById('activitiesBreakdownSection');
+    if (section) section.style.display = 'none';
+  }
+
+  showPerformanceInstructions() {
+    const container = document.getElementById('performanceAnalytics');
+    if (container) {
+      container.innerHTML = `
+        <div class="analytics-placeholder">
+          <h3>📋 Performance Metrics Options</h3>
+          
+          <div style="background: #f0f9ff; padding: 12px; border-radius: 6px; margin-bottom: 16px;">
+            <strong>Option 1: Basic Page Metrics</strong>
+            <p style="margin: 8px 0 0 0; font-size: 13px;">
+              Click <strong>"🔄 Refresh Metrics"</strong> above to see:<br>
+              ✓ Page load time, First Paint, FCP<br>
+              ✓ Tag library (Launch/Tealium) timing<br>
+              ✓ DOM timing metrics
+            </p>
+          </div>
+          
+          <div style="background: #fef2f2; padding: 12px; border-radius: 6px;">
+            <strong>Option 2: Full Target Analysis (with Activities)</strong>
+            <p style="margin: 8px 0 0 0; font-size: 13px;">
+              For per-activity timing and flicker analysis:<br>
+              1. Go to <strong>Activities</strong> tab<br>
+              2. Click <strong>"🔍 Start Monitoring & Reload"</strong><br>
+              3. Click <strong>"⚡ Analyze Target Performance"</strong> button<br>
+              <br>
+              <strong>You'll see:</strong><br>
+              ✓ Individual breakdown for each activity<br>
+              ✓ Per-activity flicker calculation<br>
+              ✓ Load timing for each experience
+            </p>
+          </div>
+          
+          <p style="margin-top: 16px; color: #6b7280; font-size: 12px;">
+            ℹ️ Target-specific metrics require activity detection for accuracy.
+          </p>
+        </div>
+      `;
+    }
+  }
+
   escapeHtml(text) {
     if (!text) return '';
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+  }
+
+  /* ========================================
+     FLICKER TEST METHODS
+     ======================================== */
+
+  async showFlickerTestReady() {
+    // Check if we came from Activities tab with context
+    const testContext = await chrome.storage.local.get(['snippetTestWithActivities', 'snippetTestActivitiesCount']);
+    
+    const guidanceBanner = document.querySelector('.test-warning');
+    
+    if (testContext.snippetTestWithActivities && testContext.snippetTestActivitiesCount > 0) {
+      // Show success message - activities detected!
+      guidanceBanner.innerHTML = `
+        <div class="warning-icon">✅</div>
+        <div class="warning-content">
+          <strong>Ready to Test!</strong> Detected ${testContext.snippetTestActivitiesCount} Adobe Target ${testContext.snippetTestActivitiesCount === 1 ? 'activity' : 'activities'}.
+          <ul style="margin: 8px 0 0 20px; font-size: 12px;">
+            <li>Test 1: Page will reload WITH prehiding snippet</li>
+            <li>Test 2: Page will reload WITHOUT prehiding snippet</li>
+            <li>Results will show real flicker difference for your activities</li>
+          </ul>
+        </div>
+      `;
+      guidanceBanner.style.background = '#d1fae5';
+      guidanceBanner.style.borderColor = '#10b981';
+      
+      // Enable test button
+      const testBtn = document.getElementById('runFlickerTest');
+      if (testBtn) {
+        testBtn.disabled = false;
+        testBtn.style.opacity = '1';
+      }
+      
+    } else {
+      // Show standard warning - no activities context
+      guidanceBanner.innerHTML = `
+        <div class="warning-icon">⚠️</div>
+        <div class="warning-content">
+          <strong>Important:</strong> For accurate flicker testing, make sure Adobe Target activities are loaded on this page.
+          <ul style="margin: 8px 0 0 20px; font-size: 12px;">
+            <li><strong>Recommended:</strong> Go to Activities tab first, scan for activities, then click "🧪 Test Flicker Impact"</li>
+            <li>Or: Continue anyway to test without activity validation</li>
+            <li>Results may show "N/A" if no activities are detected during test</li>
+          </ul>
+        </div>
+      `;
+      guidanceBanner.style.background = '#fef3c7';
+      guidanceBanner.style.borderColor = '#fbbf24';
+    }
+  }
+
+  async detectPrehidingSnippet() {
+    console.log('🔍 Detecting prehiding snippet...');
+    
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      
+      const result = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => {
+          // Search for prehiding snippet in all scripts
+          const scripts = document.querySelectorAll('script');
+          let snippetFound = false;
+          let snippetDetails = null;
+          
+          for (const script of scripts) {
+            const content = script.textContent;
+            
+            // Look for prehiding snippet patterns
+            if (content.includes('prehiding') || 
+                content.includes('body { opacity: 0') ||
+                content.includes('body{opacity:0') ||
+                (content.includes('opacity') && content.includes('setTimeout') && content.includes('adobe'))) {
+              
+              snippetFound = true;
+              
+              // Extract timeout value
+              const timeoutMatch = content.match(/setTimeout.*?(\d{3,4})/);
+              const timeout = timeoutMatch ? timeoutMatch[1] + 'ms' : 'Unknown';
+              
+              // Determine style
+              let style = 'body { opacity: 0 }';
+              if (content.includes('visibility: hidden')) {
+                style = 'body { visibility: hidden }';
+              }
+              
+              // Determine location
+              let location = 'Inline script in <head>';
+              if (script.src) {
+                location = script.src;
+              } else if (script.id) {
+                location = `Inline script (ID: ${script.id})`;
+              }
+              
+              snippetDetails = {
+                timeout,
+                style,
+                location,
+                fullContent: content.substring(0, 500) // First 500 chars for logging
+              };
+              
+              break;
+            }
+          }
+          
+          return {
+            detected: snippetFound,
+            details: snippetDetails
+          };
+        }
+      });
+      
+      const snippetInfo = result[0].result;
+      console.log('Snippet detection result:', snippetInfo);
+      
+      this.updateSnippetStatus(snippetInfo);
+      
+    } catch (error) {
+      console.error('Error detecting snippet:', error);
+      this.updateSnippetStatus({ detected: false, error: true });
+    }
+  }
+
+  updateSnippetStatus(snippetInfo) {
+    const statusElement = document.getElementById('snippetDetected');
+    const detailsElement = document.getElementById('snippetDetails');
+    const runTestBtn = document.getElementById('runFlickerTest');
+    
+    if (snippetInfo.error) {
+      statusElement.innerHTML = '<span class="status-value" style="color: #dc2626;">❌ Error detecting snippet</span>';
+      if (runTestBtn) runTestBtn.disabled = true;
+      return;
+    }
+    
+    if (snippetInfo.detected) {
+      statusElement.innerHTML = '<span class="status-value detected">✅ Detected</span>';
+      
+      // Show details
+      if (detailsElement && snippetInfo.details) {
+        detailsElement.style.display = 'block';
+        document.getElementById('snippetTimeout').textContent = snippetInfo.details.timeout;
+        document.getElementById('snippetStyle').textContent = snippetInfo.details.style;
+        document.getElementById('snippetLocation').textContent = snippetInfo.details.location;
+      }
+      
+      // Enable test button
+      if (runTestBtn) runTestBtn.disabled = false;
+      
+    } else {
+      statusElement.innerHTML = '<span class="status-value not-detected">❌ Not Found</span>';
+      if (detailsElement) detailsElement.style.display = 'none';
+      
+      // Still allow test to run
+      if (runTestBtn) {
+        runTestBtn.disabled = false;
+        runTestBtn.textContent = '🚀 Run Test (No snippet detected)';
+      }
+    }
+  }
+
+  async loadSavedSnippetTestResults() {
+    try {
+      const storage = await chrome.storage.local.get(['flickerTestResults', 'flickerTestTabId', 'flickerTestUrl']);
+      
+      // Check if results exist AND match current tab/URL
+      if (storage.flickerTestResults && storage.flickerTestTabId === this.currentTabId) {
+        // Verify URL hasn't changed
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        const currentUrl = tab.url;
+        
+        // Simple URL comparison (ignore query params and hash)
+        const savedUrlBase = storage.flickerTestUrl ? storage.flickerTestUrl.split('?')[0].split('#')[0] : '';
+        const currentUrlBase = currentUrl ? currentUrl.split('?')[0].split('#')[0] : '';
+        
+        if (savedUrlBase === currentUrlBase) {
+          console.log('📂 Loading saved snippet test results for current page:', storage.flickerTestResults);
+          
+          // Show the results section
+          const resultsSection = document.getElementById('resultsSection');
+          if (resultsSection) {
+            resultsSection.style.display = 'block';
+          }
+          
+          // Display the results
+          this.displayFlickerTestResults(storage.flickerTestResults);
+          
+          // Update button text
+          const testBtn = document.getElementById('runFlickerTest');
+          if (testBtn) {
+            testBtn.textContent = '🔄 Run Test Again';
+          }
+          
+          return true;
+        } else {
+          console.log('📂 Saved results are for different URL, clearing...');
+          await chrome.storage.local.remove(['flickerTestResults', 'flickerTestTabId', 'flickerTestUrl']);
+          return false;
+        }
+      } else {
+        console.log('📂 No saved snippet test results found for current page');
+        return false;
+      }
+    } catch (error) {
+      console.error('Error loading saved results:', error);
+      return false;
+    }
+  }
+
+  async runFlickerTest() {
+    console.log('🧪 Starting Flicker Test...');
+    
+    const testBtn = document.getElementById('runFlickerTest');
+    const testStatus = document.getElementById('testStatus');
+    const progressFill = document.getElementById('testProgress');
+    const progressText = document.getElementById('testProgressText');
+    
+    try {
+      // Check if chrome.storage is available
+      if (!chrome.storage || !chrome.storage.local) {
+        throw new Error('Storage API not available. Please reload the extension from chrome://extensions/');
+      }
+
+      // Disable button
+      testBtn.disabled = true;
+      testStatus.style.display = 'block';
+      
+      // CRITICAL: Detect if page HAS prehiding snippet
+      progressFill.style.width = '10%';
+      progressText.textContent = 'Detecting existing prehiding snippet...';
+      
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const snippetDetection = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => {
+          // Check for prehiding snippet patterns
+          const scripts = Array.from(document.querySelectorAll('script'));
+          for (const script of scripts) {
+            const content = script.textContent || '';
+            if (content.includes('prehiding') || 
+                content.includes('body{opacity:0') ||
+                content.includes('at-body-style') ||
+                content.includes('alloy-prehiding')) {
+              return true;
+            }
+          }
+          
+          // Check for existing prehiding style
+          const prehidingStyles = document.querySelectorAll('style[id*="prehiding"], style[id*="at-body-style"]');
+          if (prehidingStyles.length > 0) {
+            return true;
+          }
+          
+          return false;
+        }
+      });
+      
+      const hasSnippet = snippetDetection && snippetDetection[0] && snippetDetection[0].result;
+      console.log('🔍 SNIPPET DETECTION: Page has snippet:', hasSnippet);
+      
+      // Store test state based on snippet existence
+      const testStateData = {
+        flickerTestState: 'test_with_snippet',
+        flickerTestTabId: this.currentTabId,
+        flickerTestStartTime: Date.now(),
+        pageHasSnippet: hasSnippet,
+        // Phase 1 logic:
+        blockPrehidingSnippet: false,  // Never block in phase 1
+        injectPrehidingSnippet: !hasSnippet  // INJECT if page doesn't have one
+      };
+      
+      await chrome.storage.local.set(testStateData);
+      console.log('✅ SNIPPET TEST: Stored test state for Phase 1:', testStateData);
+      
+      // Phase 1: Test WITH snippet
+      progressFill.style.width = '25%';
+      progressText.textContent = 'Step 1/4: Ensuring debugger is active...';
+      
+      // Make SURE debugger is attached and monitoring
+      await this.startMonitoring();
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
+      progressFill.style.width = '35%';
+      if (hasSnippet) {
+        progressText.textContent = 'Step 2/4: Testing WITH existing snippet...';
+      } else {
+        progressText.textContent = 'Step 2/4: Injecting & testing WITH snippet...';
+      }
+      
+      // Clear previous test RESULTS (but keep current test state)
+      await chrome.storage.local.remove(['flickerTestResults', 'flickerTestUrl']);
+      await chrome.runtime.sendMessage({ 
+        type: 'CLEAR_FLICKER_TEST_DATA',
+        tabId: this.currentTabId 
+      });
+      
+      // Reload page to measure WITH snippet
+      await chrome.tabs.reload(this.currentTabId);
+      
+      progressFill.style.width = '40%';
+      progressText.textContent = 'Waiting for page to load...';
+      
+      progressFill.style.width = '50%';
+      progressText.textContent = 'Step 3/4: Waiting for page & Target to load...';
+      
+      // Wait for page load AND Target call to complete (8 seconds total)
+      await new Promise(resolve => setTimeout(resolve, 8000));
+      
+      // Manually trigger first collection (in case webNavigation didn't fire)
+      console.log('🧪 FLICKER TEST: Manually collecting WITH snippet metrics...');
+      console.log('🧪 FLICKER TEST: Sending message with tabId:', this.currentTabId);
+      const response1 = await chrome.runtime.sendMessage({ 
+        type: 'COLLECT_FLICKER_METRICS',
+        tabId: this.currentTabId 
+      });
+      console.log('🧪 FLICKER TEST: WITH snippet collection response:', response1);
+      
+      // Update state for second test
+      const testContext = await chrome.storage.local.get(['pageHasSnippet']);
+      const phase2StateData = {
+        flickerTestState: 'test_without_snippet',
+        flickerTestTabId: this.currentTabId,  // ✅ Keep tab ID set
+        // Phase 2 logic:
+        blockPrehidingSnippet: testContext.pageHasSnippet,  // BLOCK only if page had snippet
+        injectPrehidingSnippet: false  // Never inject in phase 2
+      };
+      
+      await chrome.storage.local.set(phase2StateData);
+      console.log('✅ SNIPPET TEST: Stored test state for Phase 2:', phase2StateData);
+      
+      progressFill.style.width = '65%';
+      if (testContext.pageHasSnippet) {
+        progressText.textContent = 'Step 4/4: Blocking & testing WITHOUT snippet...';
+      } else {
+        progressText.textContent = 'Step 4/4: Testing WITHOUT snippet (baseline)...';
+      }
+      
+      // Reload page again to measure WITHOUT snippet
+      await chrome.tabs.reload(this.currentTabId);
+      
+      progressFill.style.width = '75%';
+      progressText.textContent = 'Step 4/4: Waiting for second test...';
+      
+      // Wait for second test (same duration as first)
+      await new Promise(resolve => setTimeout(resolve, 8000));
+      
+      // Manually trigger second collection
+      console.log('🧪 FLICKER TEST: Manually collecting WITHOUT snippet metrics...');
+      console.log('🧪 FLICKER TEST: Sending message with tabId:', this.currentTabId);
+      const response2 = await chrome.runtime.sendMessage({ 
+        type: 'COLLECT_FLICKER_METRICS',
+        tabId: this.currentTabId 
+      });
+      console.log('🧪 FLICKER TEST: WITHOUT snippet collection response:', response2);
+      
+      progressFill.style.width = '100%';
+      progressText.textContent = 'Test complete! Loading results...';
+      
+      // Retrieve test results
+      const results = await chrome.storage.local.get(['flickerTestResults']);
+      
+      if (results.flickerTestResults) {
+        this.displayFlickerTestResults(results.flickerTestResults);
+      }
+      
+      // Clean up test state AND context flags
+      await chrome.storage.local.remove(['flickerTestState', 'flickerTestTabId', 'flickerTestStartTime', 'blockPrehidingSnippet', 'injectPrehidingSnippet', 'pageHasSnippet', 'snippetTestWithActivities', 'snippetTestActivitiesCount']);
+      
+      // Hide progress, show results
+      setTimeout(() => {
+        testStatus.style.display = 'none';
+        document.getElementById('resultsSection').style.display = 'block';
+        testBtn.disabled = false;
+        testBtn.textContent = '🔄 Run Test Again';
+      }, 1000);
+      
+    } catch (error) {
+      console.error('Error running flicker test:', error);
+      progressText.textContent = '❌ ' + error.message;
+      progressText.style.color = '#dc2626';
+      
+      // Show user-friendly message
+      alert('⚠️ Extension Error\n\n' + error.message + '\n\nSteps to fix:\n1. Go to chrome://extensions/\n2. Find "Adobe Target Activity Inspector"\n3. Click the 🔄 Reload button\n4. Try again');
+      
+      testBtn.disabled = false;
+      testStatus.style.display = 'none';
+    }
+  }
+
+  displayFlickerTestResults(results) {
+    console.log('📊 Displaying flicker test results:', results);
+    
+    const { withSnippet, withoutSnippet } = results;
+    
+    // Check if we have valid data
+    const hasValidWithData = withSnippet && (withSnippet.fcp || withSnippet.activityTime);
+    const hasValidWithoutData = withoutSnippet && (withoutSnippet.fcp || withoutSnippet.activityTime);
+    
+    console.log('📊 Data validity check:', {
+      hasValidWithData,
+      hasValidWithoutData,
+      withSnippet,
+      withoutSnippet
+    });
+    
+    // WITH Snippet metrics
+    document.getElementById('flickerWith').textContent = 
+      (withSnippet?.flicker !== null && withSnippet?.flicker !== undefined) ? `${withSnippet.flicker}ms` : 'No Activity';
+    document.getElementById('fcpWith').textContent = 
+      withSnippet?.fcp ? `${withSnippet.fcp}ms` : 'N/A';
+    document.getElementById('activityWith').textContent = 
+      withSnippet?.activityTime !== null && withSnippet?.activityTime !== undefined ? `${withSnippet.activityTime}ms` : 'No Activity';
+    document.getElementById('pageLoadWith').textContent = 
+      withSnippet?.pageLoad ? `${withSnippet.pageLoad}ms` : 'N/A';
+    
+    // Status badge
+    const statusWith = document.getElementById('statusWith');
+    if (withSnippet?.activityTime === null) {
+      statusWith.innerHTML = '<span class="status-badge">ℹ️ No Target Activity Detected</span>';
+    } else if (withSnippet?.flicker !== null && withSnippet?.flicker !== undefined) {
+      if (withSnippet.flicker < 300) {
+        statusWith.innerHTML = '<span class="status-badge low-risk">✅ Low Flicker Risk</span>';
+      } else {
+        statusWith.innerHTML = '<span class="status-badge high-risk">⚠️ High Flicker Risk</span>';
+      }
+    } else {
+      statusWith.innerHTML = '<span class="status-badge">⚠️ No Data Available</span>';
+    }
+    
+    // WITHOUT Snippet metrics
+    document.getElementById('flickerWithout').textContent = 
+      (withoutSnippet?.flicker !== null && withoutSnippet?.flicker !== undefined) ? `${withoutSnippet.flicker}ms` : 'No Activity';
+    document.getElementById('fcpWithout').textContent = 
+      withoutSnippet?.fcp ? `${withoutSnippet.fcp}ms` : 'N/A';
+    document.getElementById('activityWithout').textContent = 
+      withoutSnippet?.activityTime !== null && withoutSnippet?.activityTime !== undefined ? `${withoutSnippet.activityTime}ms` : 'No Activity';
+    document.getElementById('pageLoadWithout').textContent = 
+      withoutSnippet?.pageLoad ? `${withoutSnippet.pageLoad}ms` : 'N/A';
+    
+    // Status badge
+    const statusWithout = document.getElementById('statusWithout');
+    if (withoutSnippet?.activityTime === null) {
+      statusWithout.innerHTML = '<span class="status-badge">ℹ️ No Target Activity Detected</span>';
+    } else if (withoutSnippet?.flicker !== null && withoutSnippet?.flicker !== undefined) {
+      if (withoutSnippet.flicker < 300) {
+        statusWithout.innerHTML = '<span class="status-badge low-risk">✅ Low Flicker Risk</span>';
+      } else {
+        statusWithout.innerHTML = '<span class="status-badge high-risk">⚠️ High Flicker Risk</span>';
+      }
+    } else {
+      statusWithout.innerHTML = '<span class="status-badge">⚠️ No Data Available</span>';
+    }
+    
+    // Calculate difference
+    const flickerDiff = document.getElementById('flickerDifference');
+    let difference = null;
+    
+    if (withoutSnippet?.flicker !== null && withoutSnippet?.flicker !== undefined && 
+        withSnippet?.flicker !== null && withSnippet?.flicker !== undefined) {
+      difference = withoutSnippet.flicker - withSnippet.flicker;
+      
+      if (difference > 0) {
+        flickerDiff.textContent = `${difference}ms`;
+        flickerDiff.style.color = '#059669';
+      } else if (difference < 0) {
+        flickerDiff.textContent = `${Math.abs(difference)}ms worse`;
+        flickerDiff.style.color = '#dc2626';
+      } else {
+        flickerDiff.textContent = 'No difference';
+        flickerDiff.style.color = '#6b7280';
+      }
+    } else {
+      flickerDiff.textContent = 'N/A';
+      flickerDiff.style.color = '#9ca3af';
+    }
+    
+    // Detailed analysis
+    this.generateFlickerAnalysis(withSnippet, withoutSnippet, difference);
+    
+    // Recommendations
+    this.generateFlickerRecommendations(withSnippet, withoutSnippet, difference);
+  }
+
+  generateFlickerAnalysis(withSnippet, withoutSnippet, difference) {
+    const analysisContainer = document.getElementById('detailedAnalysis');
+    
+    let analysis = '<div style="font-size: 13px; line-height: 1.7;">';
+    
+    // Check if activities were present
+    if (withSnippet?.activityTime === null || withoutSnippet?.activityTime === null) {
+      analysis += `<p><strong>ℹ️ No Target Activities Detected</strong></p>`;
+      analysis += `<p>Adobe Target API calls were detected, but <strong>no actual personalization activities were delivered</strong>. This means:</p>`;
+      analysis += `<ul style="margin-left: 20px; margin-top: 8px;">`;
+      analysis += `<li>The page loaded Target libraries (at.js or alloy.js)</li>`;
+      analysis += `<li>Target API calls were made to Adobe servers</li>`;
+      analysis += `<li>But the response contained no activities/offers</li>`;
+      analysis += `</ul>`;
+      analysis += `<p style="margin-top: 12px;"><strong>Why This Happens:</strong></p>`;
+      analysis += `<ul style="margin-left: 20px;">`;
+      analysis += `<li>No activities are targeted to this page URL</li>`;
+      analysis += `<li>Activities exist but you don't qualify for the audience</li>`;
+      analysis += `<li>Activities are paused or in draft mode</li>`;
+      analysis += `</ul>`;
+      analysis += `<p style="margin-top: 12px;"><strong>Result:</strong> Without activities, there's no flicker to measure. The prehiding snippet would have no impact on this page.</p>`;
+      analysis += `<p style="margin-top: 12px; font-size: 12px; color: #6b7280;"><em>Tip: Go to the Activities tab to confirm if activities are present. Test on a page where activities are actively delivering.</em></p>`;
+      analysis += '</div>';
+      analysisContainer.innerHTML = analysis;
+      return;
+    }
+    
+    // Check if we have valid data
+    if (!withSnippet || !withoutSnippet || difference === null) {
+      analysis += `<p><strong>⚠️ Unable to Generate Analysis</strong></p>`;
+      analysis += `<p>The test was unable to collect complete performance metrics. This could happen because:</p>`;
+      analysis += `<ul style="margin-left: 20px; margin-top: 8px;">`;
+      analysis += `<li>Page loaded too quickly (metrics not yet available)</li>`;
+      analysis += `<li>Target API calls occurred before performance measurement</li>`;
+      analysis += `</ul>`;
+      analysis += `<p style="margin-top: 12px;"><strong>Suggestions:</strong></p>`;
+      analysis += `<ul style="margin-left: 20px;">`;
+      analysis += `<li>Make sure the page has active Adobe Target activities (check Activities tab)</li>`;
+      analysis += `<li>Open browser console (F12) to see detailed logs</li>`;
+      analysis += `<li>Try running the test again</li>`;
+      analysis += `</ul>`;
+      analysis += '</div>';
+      analysisContainer.innerHTML = analysis;
+      return;
+    }
+    
+    analysis += `<p><strong>Test Summary:</strong></p>`;
+    analysis += `<p>We measured flicker in two scenarios:</p>`;
+    analysis += `<ul style="margin-left: 20px; margin-top: 8px;">`;
+    analysis += `<li><strong>WITH Snippet:</strong> ${withSnippet.flicker || 'N/A'}ms of visible flicker (FCP to Activity Applied)</li>`;
+    analysis += `<li><strong>WITHOUT Snippet:</strong> ${withoutSnippet.flicker || 'N/A'}ms of visible flicker</li>`;
+    analysis += `</ul>`;
+    
+    if (difference > 0) {
+      analysis += `<p style="margin-top: 12px;"><strong>✅ Verdict:</strong> The prehiding snippet <strong>reduces flicker by ${difference}ms</strong>. This represents a ${Math.round((difference/withoutSnippet.flicker)*100)}% improvement in user experience.</p>`;
+    } else if (difference < 0) {
+      analysis += `<p style="margin-top: 12px;"><strong>⚠️ Unexpected Result:</strong> The test shows ${Math.abs(difference)}ms <em>more</em> flicker with the snippet. This could indicate the snippet timeout is too long or other performance issues.</p>`;
+    } else {
+      analysis += `<p style="margin-top: 12px;"><strong>Neutral Result:</strong> No measurable difference in flicker between the two scenarios.</p>`;
+    }
+    
+    analysis += `<p style="margin-top: 12px; font-size: 12px; color: #6b7280;"><em>Note: Network variance may affect results. For accurate measurement, run the test multiple times and average the results.</em></p>`;
+    
+    analysis += '</div>';
+    
+    analysisContainer.innerHTML = analysis;
+  }
+
+  generateFlickerRecommendations(withSnippet, withoutSnippet, difference) {
+    const recsContainer = document.getElementById('recommendationsContent');
+    
+    let recs = '<div style="font-size: 13px; line-height: 1.7;"><ul style="margin-left: 20px;">';
+    
+    if (difference > 100) {
+      recs += `<li><strong>Keep the prehiding snippet</strong> - It's effectively preventing ${difference}ms of flicker.</li>`;
+      recs += `<li>Current timeout (${withSnippet.snippetTimeout || '3000ms'}) seems appropriate.</li>`;
+    } else if (difference > 0 && difference <= 100) {
+      recs += `<li>The snippet provides <strong>marginal improvement</strong> (${difference}ms).</li>`;
+      recs += `<li>Consider if the added complexity is worth the small benefit.</li>`;
+      recs += `<li>Alternatively, focus on optimizing Target delivery speed instead.</li>`;
+    } else if (difference < 0) {
+      recs += `<li><strong>⚠️ Consider removing or adjusting the snippet</strong> - It may be causing more harm than good.</li>`;
+      recs += `<li>Check if the snippet timeout is too long for your Target response time.</li>`;
+      recs += `<li>Review snippet implementation - ensure it's the Adobe-recommended version.</li>`;
+    } else {
+      recs += `<li>No significant difference detected between scenarios.</li>`;
+      recs += `<li>The snippet may not be necessary for your current Target setup.</li>`;
+    }
+    
+    recs += `<li><strong>General recommendation:</strong> Run this test multiple times at different times of day for accurate results.</li>`;
+    
+    recs += '</ul></div>';
+    
+    recsContainer.innerHTML = recs;
+  }
+
+  async clearCacheAndReload() {
+    console.log('🧹 Clearing cache and reloading...');
+    
+    const btn = document.getElementById('clearCacheBtn');
+    const originalText = btn.textContent;
+    
+    try {
+      // Check if browsingData API is available
+      if (!chrome.browsingData) {
+        throw new Error('Browsing Data API not available. Please reload the extension from chrome://extensions/');
+      }
+
+      btn.textContent = '🧹 Clearing cache...';
+      btn.disabled = true;
+      
+      // Clear cache for current origin
+      await chrome.browsingData.removeCache({});
+      
+      btn.textContent = '🔄 Reloading...';
+      
+      // Reload page
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      await chrome.tabs.reload(tab.id);
+      
+      // Reset button
+      setTimeout(() => {
+        btn.textContent = originalText;
+        btn.disabled = false;
+      }, 1000);
+      
+    } catch (error) {
+      console.error('Error clearing cache:', error);
+      btn.textContent = '❌ Error';
+      setTimeout(() => {
+        btn.textContent = originalText;
+        btn.disabled = false;
+      }, 2000);
+    }
   }
 }
 

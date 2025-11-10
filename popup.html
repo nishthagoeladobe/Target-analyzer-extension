@@ -22,8 +22,10 @@
     </header>
 
     <div class="tabs">
-      <button class="tab-button active" data-tab="activities">Activities</button>
+<button class="tab-button active" data-tab="activities">Activities</button>
       <button class="tab-button" data-tab="details">Details</button>
+      <button class="tab-button" data-tab="performance">Performance</button>
+      <button class="tab-button" data-tab="snippettest">Snippet Test</button>
       <button class="tab-button" data-tab="explanation">Explanation</button>
     </div>
 
@@ -42,6 +44,12 @@
         </div>
 
         <div class="activity-actions" id="activityActions" style="display: none;">
+          <button class="btn-primary" id="analyzePerformance">
+            ⚡ Analyze Target Performance
+          </button>
+          <button class="btn-primary" id="testSnippetImpact" style="background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%);">
+            🧪 Test Prehiding Snippet Impact
+          </button>
           <button class="btn-secondary copy-all-btn" id="copyAllActivities">
             📊 Download Complete Report (CSV)
           </button>
@@ -79,6 +87,470 @@
             <div class="empty-icon">📋</div>
             <h3>No activity details available</h3>
             <p>Click on an activity in the Activities tab to see detailed information.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Performance Tab -->
+      <div id="performance" class="tab-panel">
+        <div class="performance-header">
+          <h2>⚡ Performance Metrics</h2>
+          <button id="refreshPerformance" class="btn-refresh">🔄 Refresh Metrics</button>
+        </div>
+
+        <!-- Guidance Banner - shown when no data -->
+        <div class="performance-guidance-banner" id="performanceGuidanceBanner">
+          <div class="guidance-icon">ℹ️</div>
+          <div class="guidance-content">
+            <h3>Two Ways to View Performance Metrics</h3>
+            <div class="guidance-options">
+              <div class="guidance-option">
+                <div class="option-badge">Option 1</div>
+                <strong>Basic Page Metrics</strong>
+                <p>Click <strong>"🔄 Refresh Metrics"</strong> above for page load, FCP, and tag library timing</p>
+              </div>
+              <div class="guidance-option highlight">
+                <div class="option-badge primary">Option 2 (Recommended)</div>
+                <strong>Full Target Performance Analysis</strong>
+                <p>
+                  1. Go to <strong>Activities</strong> tab<br>
+                  2. Click <strong>"🔍 Start Monitoring & Reload"</strong><br>
+                  3. Wait for activities to be detected<br>
+                  4. Click <strong>"⚡ Analyze Target Performance"</strong>
+                </p>
+                <p style="margin-top: 8px; font-size: 11px; color: #dc2626;">
+                  <strong>This shows:</strong> Individual activity timing, flicker per activity, and complete analysis
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="performance-summary">
+          <div class="perf-card">
+            <div class="perf-icon">⚡</div>
+            <div class="perf-value" id="pageLoadTime">-</div>
+            <div class="perf-label">Page Load Time</div>
+          </div>
+          <div class="perf-card">
+            <div class="perf-icon">🎨</div>
+            <div class="perf-value" id="firstPaint">-</div>
+            <div class="perf-label">First Paint</div>
+          </div>
+          <div class="perf-card">
+            <div class="perf-icon">📦</div>
+            <div class="perf-value" id="firstContentfulPaint">-</div>
+            <div class="perf-label">First Contentful Paint</div>
+          </div>
+        </div>
+
+        <!-- Individual Activities Breakdown (Only if activities detected) -->
+        <div class="performance-section" id="activitiesBreakdownSection" style="display: none;">
+          <h3>🎯 Target Activities Performance ({{activityCount}} activities)</h3>
+          <div id="activitiesPerformanceBreakdown"></div>
+        </div>
+
+        <!-- Adobe Target Timing -->
+        <div class="performance-section">
+          <h3>🎯 Adobe Target Timing</h3>
+          <div class="timing-details-table">
+            <table class="timing-table">
+              <thead>
+                <tr>
+                  <th>Event</th>
+                  <th>Start Time</th>
+                  <th>Duration</th>
+                  <th>End Time</th>
+                </tr>
+              </thead>
+              <tbody id="timingTableBody">
+                <tr>
+                  <td colspan="4" class="no-timing-data">Loading timing data...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          
+          <div class="timing-chart" id="targetTimingChart">
+            <h4 style="margin-top: 20px; margin-bottom: 12px; font-size: 14px; color: #6b7280;">Event Sequence Timeline</h4>
+            <div class="chart-timeline">
+              <div class="timeline-item">
+                <div class="timeline-label">Library Load</div>
+                <div class="timeline-bar" id="libraryLoadBar">
+                  <span class="timeline-value" id="libraryLoadTime">-</span>
+                </div>
+              </div>
+              <div class="timeline-item">
+                <div class="timeline-label">Activity Delivery</div>
+                <div class="timeline-bar" id="activityDeliveryBar">
+                  <span class="timeline-value" id="activityDeliveryTime">-</span>
+                </div>
+              </div>
+              <div class="timeline-item">
+                <div class="timeline-label">Flicker Duration</div>
+                <div class="timeline-bar" id="flickerDurationBar">
+                  <span class="timeline-value" id="flickerDuration">-</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Detailed Metrics -->
+        <div class="performance-section">
+          <h3>📊 Detailed Metrics</h3>
+          <div class="metrics-grid">
+            <div class="metric-item">
+              <span class="metric-label">DNS Lookup:</span>
+              <span class="metric-value" id="dnsTime">-</span>
+            </div>
+            <div class="metric-item">
+              <span class="metric-label">TCP Connection:</span>
+              <span class="metric-value" id="tcpTime">-</span>
+            </div>
+            <div class="metric-item">
+              <span class="metric-label">Request Time:</span>
+              <span class="metric-value" id="requestTime">-</span>
+            </div>
+            <div class="metric-item">
+              <span class="metric-label">Response Time:</span>
+              <span class="metric-value" id="responseTime">-</span>
+            </div>
+            <div class="metric-item">
+              <span class="metric-label">DOM Interactive:</span>
+              <span class="metric-value" id="domInteractive">-</span>
+            </div>
+            <div class="metric-item">
+              <span class="metric-label">DOM Complete:</span>
+              <span class="metric-value" id="domComplete">-</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Analytics & Recommendations -->
+        <div class="performance-section analytics-section" id="analyticsSection">
+          <h3>💡 Analytics & Recommendations</h3>
+          <div id="performanceAnalytics">
+            <div class="analytics-placeholder">
+              <p>📈 Performance data will appear here after page load and Adobe Target activity delivery.</p>
+              <p>Click <strong>"Refresh Metrics"</strong> to analyze current page performance.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Impact Analysis -->
+        <div class="performance-section">
+          <h3>🔍 Adobe Target Impact Analysis</h3>
+          <div class="impact-summary" id="impactSummary">
+            <div class="impact-card">
+              <div class="impact-label">Target Overhead</div>
+              <div class="impact-value" id="targetOverhead">-</div>
+              <div class="impact-status" id="targetOverheadStatus">⏳ Calculating...</div>
+              <div class="impact-formula" id="targetOverheadFormula"></div>
+            </div>
+            <div class="impact-card">
+              <div class="impact-label">Flicker Risk</div>
+              <div class="impact-value" id="flickerRisk">-</div>
+              <div class="impact-status" id="flickerRiskStatus">⏳ Calculating...</div>
+              <div class="impact-formula" id="flickerFormula"></div>
+            </div>
+            <div class="impact-card">
+              <div class="impact-label">Optimization Score</div>
+              <div class="impact-value" id="optimizationScore">-</div>
+              <div class="impact-status" id="optimizationScoreStatus">⏳ Calculating...</div>
+              <div class="impact-formula" id="scoreFormula"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Prehiding Snippet Test Tab -->
+      <div id="snippettest" class="tab-panel">
+        <div class="flicker-test-header">
+          <h2>🧪 Prehiding Snippet Performance Test</h2>
+          <p class="flicker-test-subtitle">Measure Adobe Target's complete performance impact: WITH vs WITHOUT prehiding snippet</p>
+        </div>
+
+        <!-- Snippet Status Section -->
+        <div class="flicker-section">
+          <h3>📋 Current Status</h3>
+          <div class="snippet-status-card" id="snippetStatusCard">
+            <div class="status-row">
+              <span class="status-label">Prehiding Snippet:</span>
+              <span class="status-value" id="snippetDetected">
+                <span class="spinner-small"></span> Detecting...
+              </span>
+            </div>
+            <div class="snippet-details" id="snippetDetails" style="display: none;">
+              <div class="detail-row">
+                <span class="detail-label">Timeout:</span>
+                <span class="detail-value" id="snippetTimeout">-</span>
+              </div>
+              <div class="detail-row">
+                <span class="detail-label">Style Applied:</span>
+                <span class="detail-value" id="snippetStyle">-</span>
+              </div>
+              <div class="detail-row">
+                <span class="detail-label">Script Location:</span>
+                <span class="detail-value" id="snippetLocation">-</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Test Controls Section -->
+        <div class="flicker-section">
+          <h3>🎮 Run Test</h3>
+          <div class="test-controls-card">
+            <div class="test-warning">
+              <div class="warning-icon">⚠️</div>
+              <div class="warning-content">
+                <strong>Important:</strong> This test will reload the page twice to measure performance with different configurations.
+                <ul style="margin: 8px 0 0 20px; font-size: 12px;">
+                  <li>First: Measure WITH prehiding snippet (current state)</li>
+                  <li>Second: Measure WITHOUT prehiding snippet (snippet blocked)</li>
+                  <li>Results will show real flicker difference</li>
+                </ul>
+              </div>
+            </div>
+            
+            <div class="test-buttons">
+              <button id="runFlickerTest" class="btn-test-primary">
+                🚀 Run A/B Test (2 page reloads)
+              </button>
+              <button id="clearCacheBtn" class="btn-test-secondary">
+                🧹 Clear Cache & Reload
+              </button>
+            </div>
+
+            <div class="test-status" id="testStatus" style="display: none;">
+              <div class="progress-indicator">
+                <div class="progress-bar">
+                  <div class="progress-fill" id="testProgress"></div>
+                </div>
+                <div class="progress-text" id="testProgressText">Initializing test...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Results Section -->
+        <div class="flicker-section" id="resultsSection" style="display: none;">
+          <h3>📊 Test Results</h3>
+          <div class="results-comparison">
+            <!-- WITH Snippet Column -->
+            <div class="result-column with-snippet">
+              <div class="result-header">
+                <div class="result-badge success">✅ WITH Snippet</div>
+                <div class="result-title">Prehiding Active</div>
+              </div>
+              <div class="result-metrics">
+                <div class="result-metric">
+                  <span class="metric-icon">⚡</span>
+                  <div class="metric-content">
+                    <span class="metric-label">Flicker Duration</span>
+                    <span class="metric-value" id="flickerWith">-</span>
+                  </div>
+                </div>
+                <div class="result-metric">
+                  <span class="metric-icon">🎯</span>
+                  <div class="metric-content">
+                    <span class="metric-label">First Contentful Paint</span>
+                    <span class="metric-value" id="fcpWith">-</span>
+                  </div>
+                </div>
+                <div class="result-metric">
+                  <span class="metric-icon">📦</span>
+                  <div class="metric-content">
+                    <span class="metric-label">Activity Applied</span>
+                    <span class="metric-value" id="activityWith">-</span>
+                  </div>
+                </div>
+                <div class="result-metric">
+                  <span class="metric-icon">⏱️</span>
+                  <div class="metric-content">
+                    <span class="metric-label">Page Load Time</span>
+                    <span class="metric-value" id="pageLoadWith">-</span>
+                  </div>
+                </div>
+              </div>
+              <div class="result-status" id="statusWith">
+                <span class="status-badge">-</span>
+              </div>
+            </div>
+
+            <!-- VS Divider -->
+            <div class="vs-divider">
+              <div class="vs-circle">VS</div>
+              <div class="impact-summary" id="impactSummary">
+                <div class="impact-value" id="flickerDifference">-</div>
+                <div class="impact-label">Flicker Prevented</div>
+              </div>
+            </div>
+
+            <!-- WITHOUT Snippet Column -->
+            <div class="result-column without-snippet">
+              <div class="result-header">
+                <div class="result-badge warning">⚠️ WITHOUT Snippet</div>
+                <div class="result-title">No Prehiding</div>
+              </div>
+              <div class="result-metrics">
+                <div class="result-metric">
+                  <span class="metric-icon">⚡</span>
+                  <div class="metric-content">
+                    <span class="metric-label">Flicker Duration</span>
+                    <span class="metric-value" id="flickerWithout">-</span>
+                  </div>
+                </div>
+                <div class="result-metric">
+                  <span class="metric-icon">🎯</span>
+                  <div class="metric-content">
+                    <span class="metric-label">First Contentful Paint</span>
+                    <span class="metric-value" id="fcpWithout">-</span>
+                  </div>
+                </div>
+                <div class="result-metric">
+                  <span class="metric-icon">📦</span>
+                  <div class="metric-content">
+                    <span class="metric-label">Activity Applied</span>
+                    <span class="metric-value" id="activityWithout">-</span>
+                  </div>
+                </div>
+                <div class="result-metric">
+                  <span class="metric-icon">⏱️</span>
+                  <div class="metric-content">
+                    <span class="metric-label">Page Load Time</span>
+                    <span class="metric-value" id="pageLoadWithout">-</span>
+                  </div>
+                </div>
+              </div>
+              <div class="result-status" id="statusWithout">
+                <span class="status-badge">-</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Detailed Analysis -->
+          <div class="detailed-analysis">
+            <h4>🔍 Detailed Analysis</h4>
+            <div class="analysis-content" id="detailedAnalysis">
+              <p>Analysis will appear here after test completion...</p>
+            </div>
+          </div>
+
+          <!-- Recommendations -->
+          <div class="recommendations-box">
+            <h4>💡 Recommendations</h4>
+            <div class="recommendations-content" id="recommendationsContent">
+              <p>Recommendations will appear here after test completion...</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Calculation Explanation -->
+        <div class="flicker-section calculation-section">
+          <h3>📐 How We Calculate Flicker</h3>
+          <div class="calculation-content">
+            <div class="calculation-formula">
+              <div class="formula-box">
+                <div class="formula-title">Flicker Duration Formula:</div>
+                <div class="formula-equation">
+                  <span class="formula-var">Flicker</span> = 
+                  <span class="formula-var">Activity Time</span> - 
+                  <span class="formula-var">FCP</span>
+                </div>
+                <div class="formula-result">= Time user saw wrong content before Target changed it</div>
+              </div>
+            </div>
+
+            <div class="metric-explanations">
+              <div class="metric-explain">
+                <div class="metric-explain-icon">🎯</div>
+                <div class="metric-explain-content">
+                  <strong>FCP (First Contentful Paint):</strong>
+                  <p>Time when user <strong>first sees content</strong> on the page (ms from page load)</p>
+                  <code>window.performance.getEntriesByType('paint')</code>
+                </div>
+              </div>
+
+              <div class="metric-explain">
+                <div class="metric-explain-icon">📦</div>
+                <div class="metric-explain-content">
+                  <strong>Activity Applied:</strong>
+                  <p>Time when Adobe Target <strong>delivered personalized content</strong> (ms from page load)</p>
+                  <p style="font-size: 12px; margin-top: 4px;">
+                    • <strong>Alloy.js:</strong> <code>adobedc.demdex.net/ee/v1/interact</code><br>
+                    • <strong>at.js:</strong> <code>tt.omtrdc.net/rest/v1/delivery</code>
+                  </p>
+                  <p style="font-size: 11px; margin-top: 6px; color: #9ca3af;">
+                    <strong>Multiple Activities:</strong> If page has multiple activities, we use the <strong>LATEST</strong> delivery time (when all personalization is complete).
+                  </p>
+                </div>
+              </div>
+
+              <div class="metric-explain">
+                <div class="metric-explain-icon">⚡</div>
+                <div class="metric-explain-content">
+                  <strong>Flicker Duration:</strong>
+                  <p>The gap between user seeing page and Target changing it</p>
+                  <div class="flicker-visual">
+                    <div class="timeline">
+                      <span class="timeline-point fcp-point">📍 FCP (180ms)</span>
+                      <span class="timeline-line">────────────</span>
+                      <span class="timeline-point activity-point">📍 Activity (4344ms)</span>
+                    </div>
+                    <div class="timeline-label">⚡ Flicker = 4164ms (user saw default content)</div>
+                  </div>
+                  <p style="margin-top: 8px;">
+                    ✅ <strong>Good:</strong> &lt; 300ms (barely noticeable)<br>
+                    ⚠️ <strong>Bad:</strong> &gt; 300ms (visible content jump)
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div class="calculation-note">
+              <strong>💡 Why This Matters:</strong>
+              <p>High flicker means users see default content change to personalized content. The prehiding snippet prevents this by hiding the page (<code>opacity: 0</code>) until Target is ready.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Help Section -->
+        <div class="flicker-section help-section">
+          <h3>❓ How This Works</h3>
+          <div class="help-content">
+            <div class="help-item">
+              <div class="help-icon">1️⃣</div>
+              <div class="help-text">
+                <strong>Detects Prehiding Snippet:</strong> Checks if Adobe Target's prehiding snippet exists in your page's <code>&lt;head&gt;</code>
+              </div>
+            </div>
+            <div class="help-item">
+              <div class="help-icon">2️⃣</div>
+              <div class="help-text">
+                <strong>Runs First Test (WITH):</strong> Reloads page normally and measures flicker with snippet active
+              </div>
+            </div>
+            <div class="help-item">
+              <div class="help-icon">3️⃣</div>
+              <div class="help-text">
+                <strong>Runs Second Test (WITHOUT):</strong> Blocks prehiding snippet, reloads page, and measures flicker
+              </div>
+            </div>
+            <div class="help-item">
+              <div class="help-icon">4️⃣</div>
+              <div class="help-text">
+                <strong>Compares Results:</strong> Shows you exactly how much flicker the snippet prevents
+              </div>
+            </div>
+          </div>
+          
+          <div class="what-is-prehiding">
+            <h4>🛡️ What is a Prehiding Snippet?</h4>
+            <p>The prehiding snippet is a small JavaScript code that temporarily hides your page content (<code>opacity: 0</code>) while Adobe Target loads personalized content. This prevents "flicker" - the brief moment where visitors see default content before it changes to personalized content.</p>
+            <p><strong>Without the snippet:</strong> Visitors see original content → flicker → personalized content</p>
+            <p><strong>With the snippet:</strong> Page hidden → personalized content loads → page shows (no flicker)</p>
           </div>
         </div>
       </div>
