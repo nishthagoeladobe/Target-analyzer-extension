@@ -991,20 +991,45 @@ class AdobeTargetDebugger {
     if (postData) {
       try {
         const data = JSON.parse(postData);
-        // Check for Alloy.js event types
+        
+        // Check for Alloy.js event types (most common structure)
         if (data.events && Array.isArray(data.events) && data.events.length > 0) {
-          const eventTypes = data.events.map(e => e.type || e.xdm?.eventType || 'unknown');
-          return eventTypes.join(', ') || 'pageview';
+          const eventTypes = [];
+          
+          data.events.forEach(event => {
+            // Try multiple paths to find the event type
+            const eventType = 
+              event.xdm?.eventType ||           // Standard XDM path
+              event.xdm?.web?.webInteraction?.name ||  // Web interaction name
+              event.type ||                      // Direct type field
+              event.eventType ||                 // Root level eventType
+              null;
+            
+            if (eventType) {
+              eventTypes.push(eventType);
+            }
+          });
+          
+          if (eventTypes.length > 0) {
+            return eventTypes.join(' | ');
+          }
         }
-        // Check for XDM event type
+        
+        // Check for XDM event type at root level
         if (data.xdm && data.xdm.eventType) {
           return data.xdm.eventType;
         }
+        
+        // Check for web interaction name
+        if (data.xdm?.web?.webInteraction?.name) {
+          return data.xdm.web.webInteraction.name;
+        }
+        
       } catch (e) {
-        // JSON parse failed, continue
+        console.log('⚠️ DEBUGGER: Error parsing POST data for event type:', e.message);
       }
     }
-    return 'pageview'; // default
+    return 'web.webpagedetails.pageViews'; // default for page views
   }
 
   storeNetworkEvent(tabId, event) {
