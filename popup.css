@@ -3446,4 +3446,240 @@ body {
     font-size: 10px;
     gap: 2px;
   }
+}
+
+/* ============================================
+   EVENTS TAB STYLES
+   ============================================ */
+
+.events-header {
+  margin-bottom: 16px;
+}
+
+.events-header h2 {
+  font-size: 18px;
+  color: #2C2C2C;
+  margin-bottom: 4px;
+}
+
+.events-subtitle {
+  font-size: 12px;
+  color: #64748b;
+  margin: 0;
+}
+
+.events-summary {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.events-controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.events-controls button {
+  flex: 1;
+}
+
+.events-list {
+  max-height: 450px;
+  overflow-y: auto;
+}
+
+.event-item {
+  background: white;
+  border-radius: 6px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  border-left: 3px solid #FA0F00;
+  border: 1px solid #e2e8f0;
+  border-left: 3px solid #FA0F00;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.event-item:hover {
+  background: #f8fafc;
+  box-shadow: 0 2px 6px rgba(250, 15, 0, 0.12);
+  transform: translateX(2px);
+}
+
+.event-item.expanded {
+  background: #f8fafc;
+}
+
+.event-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.event-type {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.event-type-badge {
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.event-type-badge.interact {
+  background: linear-gradient(135deg, #2C2C2C 0%, #1E1E1E 100%);
+  color: white;
+}
+
+.event-type-badge.delivery {
+  background: linear-gradient(135deg, #FA0F00 0%, #D60A00 100%);
+  color: white;
+}
+
+.event-type-badge.other {
+  background: #e2e8f0;
+  color: #64748b;
+}
+
+.event-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #2C2C2C;
+}
+
+.event-meta {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.event-expand-icon {
+  font-size: 14px;
+  color: #FA0F00;
+  transition: transform 0.2s;
+}
+
+.event-item.expanded .event-expand-icon {
+  transform: rotate(90deg);
+}
+
+.event-details {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease-out;
+}
+
+.event-item.expanded .event-details {
+  max-height: 2000px;
+  transition: max-height 0.5s ease-in;
+}
+
+.event-details-inner {
+  padding-top: 12px;
+  margin-top: 12px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.event-details-section {
+  margin-bottom: 16px;
+}
+
+.event-details-section:last-child {
+  margin-bottom: 0;
+}
+
+.event-details-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-bottom: 6px;
+}
+
+.event-details-content {
+  background: #1E1E1E;
+  padding: 10px 12px;
+  border-radius: 4px;
+  font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #E1E1E1;
+  max-height: 300px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.event-details-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.event-details-content::-webkit-scrollbar-track {
+  background: #2C2C2C;
+  border-radius: 3px;
+}
+
+.event-details-content::-webkit-scrollbar-thumb {
+  background: #FA0F00;
+  border-radius: 3px;
+}
+
+.event-details-content::-webkit-scrollbar-thumb:hover {
+  background: #D60A00;
+}
+
+.event-timing-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.event-timing-item {
+  background: white;
+  padding: 8px 10px;
+  border-radius: 4px;
+  border: 1px solid #e2e8f0;
+}
+
+.event-timing-label {
+  font-size: 10px;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-bottom: 2px;
+}
+
+.event-timing-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: #2C2C2C;
+}
+
+.event-status-badge {
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.event-status-badge.success {
+  background: #00875A;
+  color: white;
+}
+
+.event-status-badge.error {
+  background: #FA0F00;
+  color: white;
 } 

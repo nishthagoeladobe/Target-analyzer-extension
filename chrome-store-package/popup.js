@@ -1,6 +1,7 @@
 class TargetPopup {
   constructor() {
     this.activities = [];
+    this.networkEvents = [];
     this.selectedActivityId = null;
     this.currentTabId = null;
     this.isAfterReload = false;
@@ -112,6 +113,131 @@ class TargetPopup {
       this.activities = [];
       this.updateActivityList();
     }
+  }
+
+  async loadNetworkEvents() {
+    try {
+      const response = await chrome.runtime.sendMessage({ 
+        type: 'GET_EVENTS',
+        tabId: this.currentTabId 
+      });
+      
+      if (response && response.events) {
+        this.networkEvents = response.events;
+      } else {
+        this.networkEvents = [];
+      }
+      
+      this.displayNetworkEvents();
+      
+    } catch (error) {
+      console.error('Error loading network events:', error);
+      this.networkEvents = [];
+      this.displayNetworkEvents();
+    }
+  }
+
+  displayNetworkEvents() {
+    const eventsList = document.getElementById('eventsList');
+    const totalEventsEl = document.getElementById('totalEvents');
+    const interactCallsEl = document.getElementById('interactCalls');
+    const deliveryCallsEl = document.getElementById('deliveryCalls');
+    
+    if (!eventsList) return;
+
+    // Update summary counts
+    const interactCount = this.networkEvents.filter(e => e.type === 'interact').length;
+    const deliveryCount = this.networkEvents.filter(e => e.type === 'delivery').length;
+    
+    if (totalEventsEl) totalEventsEl.textContent = this.networkEvents.length;
+    if (interactCallsEl) interactCallsEl.textContent = interactCount;
+    if (deliveryCallsEl) deliveryCallsEl.textContent = deliveryCount;
+
+    // Display events
+    if (this.networkEvents.length === 0) {
+      eventsList.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">📡</div>
+          <h3>No events captured yet</h3>
+          <p>Network events will appear here when Adobe Target makes requests.</p>
+        </div>
+      `;
+      return;
+    }
+
+    eventsList.innerHTML = this.networkEvents.map(event => {
+      const eventTypeClass = event.type === 'interact' ? 'interact' : event.type === 'delivery' ? 'delivery' : 'other';
+      const statusClass = event.status === 'success' ? 'success' : event.status === 'error' ? 'error' : 'pending';
+      const formattedTimestamp = new Date(event.timestamp).toLocaleTimeString();
+      
+      return `
+        <div class="event-item" data-event-id="${event.id}">
+          <div class="event-header">
+            <div class="event-type">
+              <span class="event-type-badge ${eventTypeClass}">${event.type.toUpperCase()}</span>
+              <span class="event-name">${this.escapeHtml(event.eventType)}</span>
+            </div>
+            <div class="event-meta">
+              <span>⏰ ${formattedTimestamp}</span>
+              <span class="event-status-badge ${statusClass}">${event.statusCode || event.status}</span>
+              <span class="event-expand-icon">▶</span>
+            </div>
+          </div>
+          <div class="event-details">
+            <div class="event-details-inner">
+              <div class="event-details-section">
+                <div class="event-details-title">🌐 URL</div>
+                <div class="event-details-content">${this.escapeHtml(event.url)}</div>
+              </div>
+              
+              <div class="event-details-section">
+                <div class="event-details-title">📊 Timing</div>
+                <div class="event-timing-grid">
+                  <div class="event-timing-item">
+                    <div class="event-timing-label">Method</div>
+                    <div class="event-timing-value">${event.method}</div>
+                  </div>
+                  <div class="event-timing-item">
+                    <div class="event-timing-label">Status</div>
+                    <div class="event-timing-value">${event.statusCode || '-'}</div>
+                  </div>
+                  <div class="event-timing-item">
+                    <div class="event-timing-label">Duration</div>
+                    <div class="event-timing-value">${event.duration ? event.duration.toFixed(2) + 'ms' : '-'}</div>
+                  </div>
+                  <div class="event-timing-item">
+                    <div class="event-timing-label">Timestamp</div>
+                    <div class="event-timing-value">${formattedTimestamp}</div>
+                  </div>
+                </div>
+              </div>
+              
+              ${event.requestInfo && event.requestInfo.postData && event.requestInfo.postData.text ? `
+              <div class="event-details-section">
+                <div class="event-details-title">📤 Request Body</div>
+                <div class="event-details-content">${this.escapeHtml(JSON.stringify(JSON.parse(event.requestInfo.postData.text), null, 2))}</div>
+              </div>
+              ` : ''}
+              
+              ${event.responseHeaders ? `
+              <div class="event-details-section">
+                <div class="event-details-title">📥 Response Headers</div>
+                <div class="event-details-content">${this.escapeHtml(JSON.stringify(event.responseHeaders, null, 2))}</div>
+              </div>
+              ` : ''}
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    // Add click handlers for expand/collapse
+    eventsList.querySelectorAll('.event-item').forEach(item => {
+      item.addEventListener('click', (e) => {
+        // Toggle expanded state
+        item.classList.toggle('expanded');
+      });
+    });
   }
 
   bindEvents() {
@@ -328,6 +454,26 @@ class TargetPopup {
       });
     }
 
+    // Events Tab - Refresh Events
+    const refreshEventsBtn = document.getElementById('refreshEvents');
+    if (refreshEventsBtn) {
+      refreshEventsBtn.addEventListener('click', async () => {
+        await this.loadNetworkEvents();
+      });
+    }
+
+    // Events Tab - Clear Events
+    const clearEventsBtn = document.getElementById('clearEvents');
+    if (clearEventsBtn) {
+      clearEventsBtn.addEventListener('click', async () => {
+        await chrome.runtime.sendMessage({ 
+          type: 'CLEAR_ACTIVITIES', // This clears events too
+          tabId: this.currentTabId 
+        });
+        await this.loadNetworkEvents();
+      });
+    }
+
     // Flicker Test - Run A/B Test
     const runFlickerTestBtn = document.getElementById('runFlickerTest');
     if (runFlickerTestBtn) {
@@ -343,6 +489,11 @@ class TargetPopup {
         await this.clearCacheAndReload();
       });
     }
+
+    // Events Tab - Auto-load events when tab is opened
+    document.querySelector('[data-tab="events"]')?.addEventListener('click', async () => {
+      await this.loadNetworkEvents();
+    });
 
     // Snippet Test Tab - Load saved results, auto-detect snippet and show ready state when tab opens
     document.querySelector('[data-tab="snippettest"]')?.addEventListener('click', async () => {

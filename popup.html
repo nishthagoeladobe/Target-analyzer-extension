@@ -22,7 +22,8 @@
     </header>
 
     <div class="tabs">
-<button class="tab-button active" data-tab="activities">Activities</button>
+      <button class="tab-button active" data-tab="activities">Activities</button>
+      <button class="tab-button" data-tab="events">Events</button>
       <button class="tab-button" data-tab="details">Details</button>
       <button class="tab-button" data-tab="performance">Performance</button>
       <button class="tab-button" data-tab="snippettest">Snippet Test</button>
@@ -76,6 +77,46 @@
           <div class="controls">
             <button id="clearActivities" class="btn btn-secondary">Clear Activities</button>
             <button id="refreshActivities" class="btn btn-primary">🔍 Start Monitoring & Reload</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Events Tab -->
+      <div id="events" class="tab-panel">
+        <div class="events-header">
+          <h2>📡 Network Events</h2>
+          <p class="events-subtitle">All Adobe Target network requests and interactions</p>
+        </div>
+
+        <div class="events-summary">
+          <div class="summary-card">
+            <div class="summary-number" id="totalEvents">0</div>
+            <div class="summary-label">Total Events</div>
+          </div>
+          <div class="summary-card">
+            <div class="summary-number" id="interactCalls">0</div>
+            <div class="summary-label">Interact Calls</div>
+          </div>
+          <div class="summary-card">
+            <div class="summary-number" id="deliveryCalls">0</div>
+            <div class="summary-label">Delivery Calls</div>
+          </div>
+        </div>
+
+        <div class="events-controls">
+          <button id="refreshEvents" class="btn-primary">
+            🔄 Refresh Events
+          </button>
+          <button id="clearEvents" class="btn-secondary">
+            Clear Events
+          </button>
+        </div>
+
+        <div class="events-list" id="eventsList">
+          <div class="empty-state">
+            <div class="empty-icon">📡</div>
+            <h3>No events captured yet</h3>
+            <p>Network events will appear here when Adobe Target makes requests.</p>
           </div>
         </div>
       </div>

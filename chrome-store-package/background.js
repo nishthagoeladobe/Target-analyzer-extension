@@ -7,6 +7,7 @@ class AdobeTargetDebugger {
     this.autoDebuggerDisabled = new Set(); // tabs where auto-debugger was disabled by user action
     this.performanceData = new Map(); // tabId -> performance metrics
     this.flickerTestData = new Map(); // tabId -> { withSnippet: {}, withoutSnippet: {} }
+    this.networkEvents = new Map(); // tabId -> network events array
     
     this.init();
   }
@@ -149,6 +150,16 @@ class AdobeTargetDebugger {
           activities, 
           isDebugging, 
           debuggerDisabled: isDisabled 
+        });
+        break;
+
+      case 'GET_EVENTS':
+        console.log('📡 DEBUGGER: Getting network events for tab:', tabId);
+        const events = this.networkEvents.get(tabId) || [];
+        console.log(`📊 DEBUGGER: Found ${events.length} network events for tab:`, tabId);
+        sendResponse({ 
+          events,
+          count: events.length
         });
         break;
 
@@ -412,8 +423,21 @@ class AdobeTargetDebugger {
         postData: params.request.postData,
         timestamp: Date.now(),
         implementationType: isDeliveryCall ? 'at.js' : 'alloy.js',
-        callType: isDeliveryCall ? 'delivery' : 'interact'
+        callType: isDeliveryCall ? 'delivery' : 'interact',
+        requestId: params.requestId
       };
+      
+      // Store network event for Events tab
+      this.storeNetworkEvent(tabId, {
+        id: params.requestId,
+        type: isDeliveryCall ? 'delivery' : 'interact',
+        eventType: this.extractEventType(params.request),
+        url: url,
+        method: params.request.method,
+        timestamp: Date.now(),
+        requestInfo: requestInfo,
+        status: 'pending'
+      });
       
       // Try to get POST data using Network.getRequestPostData if method is POST
       if (params.request.method === 'POST' && !params.request.postData?.text) {
@@ -457,6 +481,13 @@ class AdobeTargetDebugger {
       pendingRequest.responseStatus = params.response.status;
       pendingRequest.responseHeaders = params.response.headers;
       pendingRequest.mimeType = params.response.mimeType;
+      
+      // Update network event status
+      this.updateNetworkEventStatus(tabId, requestId, {
+        status: params.response.status,
+        responseHeaders: params.response.headers,
+        timing: params.response.timing
+      });
     }
   }
 
@@ -950,7 +981,67 @@ class AdobeTargetDebugger {
   clearTabActivities(tabId) {
     this.activities.delete(tabId);
     this.performanceData.delete(tabId);
-    console.log('🧹 DEBUGGER: Cleared activities and performance data for tab:', tabId);
+    this.networkEvents.delete(tabId);
+    console.log('🧹 DEBUGGER: Cleared activities, performance data, and network events for tab:', tabId);
+  }
+
+  extractEventType(request) {
+    // Try to extract event type from POST data or URL
+    const postData = request.postData?.text;
+    if (postData) {
+      try {
+        const data = JSON.parse(postData);
+        // Check for Alloy.js event types
+        if (data.events && Array.isArray(data.events) && data.events.length > 0) {
+          const eventTypes = data.events.map(e => e.type || e.xdm?.eventType || 'unknown');
+          return eventTypes.join(', ') || 'pageview';
+        }
+        // Check for XDM event type
+        if (data.xdm && data.xdm.eventType) {
+          return data.xdm.eventType;
+        }
+      } catch (e) {
+        // JSON parse failed, continue
+      }
+    }
+    return 'pageview'; // default
+  }
+
+  storeNetworkEvent(tabId, event) {
+    if (!this.networkEvents.has(tabId)) {
+      this.networkEvents.set(tabId, []);
+    }
+    const events = this.networkEvents.get(tabId);
+    events.push(event);
+    console.log('📡 DEBUGGER: Stored network event:', {
+      tabId,
+      eventId: event.id,
+      eventType: event.eventType,
+      type: event.type,
+      totalEvents: events.length
+    });
+  }
+
+  updateNetworkEventStatus(tabId, requestId, responseInfo) {
+    if (!this.networkEvents.has(tabId)) return;
+    
+    const events = this.networkEvents.get(tabId);
+    const event = events.find(e => e.id === requestId);
+    
+    if (event) {
+      event.status = responseInfo.status >= 200 && responseInfo.status < 300 ? 'success' : 'error';
+      event.statusCode = responseInfo.status;
+      event.responseHeaders = responseInfo.responseHeaders;
+      event.timing = responseInfo.timing;
+      event.duration = event.timing ? (event.timing.receiveHeadersEnd - event.timing.sendStart) : null;
+      
+      console.log('✅ DEBUGGER: Updated network event status:', {
+        tabId,
+        requestId,
+        status: event.status,
+        statusCode: event.statusCode
+      });
+    }
   }
 
   updatePerformanceData(tabId, data) {
