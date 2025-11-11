@@ -21,10 +21,11 @@ body {
 }
 
 .header {
-  background: linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%);
+  background: linear-gradient(135deg, #1E1E1E 0%, #2C2C2C 100%);
   color: white;
   padding: 12px 16px;
-  box-shadow: 0 2px 8px rgba(30, 64, 175, 0.15);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  border-bottom: 3px solid #FA0F00;
 }
 
 .header-content {
@@ -60,7 +61,7 @@ body {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #2563eb;
+  background: #FA0F00;
   animation: pulse 2s infinite;
 }
 
@@ -95,8 +96,8 @@ body {
 }
 
 .tab-button.active {
-  color: #1e40af;
-  border-bottom: 3px solid #1e40af;
+  color: #FA0F00;
+  border-bottom: 3px solid #FA0F00;
   background: #f8fafc;
   margin-bottom: -2px;
 }
@@ -139,7 +140,7 @@ body {
 .summary-number {
   font-size: 22px;
   font-weight: 700;
-  color: #1e40af;
+  color: #FA0F00;
 }
 
 .summary-label {
@@ -162,9 +163,9 @@ body {
   padding: 10px 12px;
   margin-bottom: 6px;
   box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-  border-left: 3px solid #1e40af;
+  border-left: 3px solid #FA0F00;
   border: 1px solid #e2e8f0;
-  border-left: 3px solid #1e40af;
+  border-left: 3px solid #FA0F00;
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -175,9 +176,9 @@ body {
 
 .activity-item:hover {
   background: #f8fafc;
-  box-shadow: 0 2px 6px rgba(30, 64, 175, 0.12);
+  box-shadow: 0 2px 6px rgba(250, 15, 0, 0.12);
   transform: translateX(2px);
-  border-left-color: #2563eb;
+  border-left-color: #D60A00;
 }
 
 /* Detail Tabs Styles */
@@ -773,14 +774,14 @@ body {
 }
 
 .activities-controls .btn-primary {
-  background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+  background: linear-gradient(135deg, #FA0F00 0%, #D60A00 100%);
   color: white;
-  box-shadow: 0 2px 4px rgba(220, 38, 38, 0.2);
+  box-shadow: 0 2px 4px rgba(250, 15, 0, 0.2);
 }
 
 .activities-controls .btn-primary:hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(220, 38, 38, 0.3);
+  box-shadow: 0 4px 8px rgba(250, 15, 0, 0.3);
 }
 
 .activities-controls .btn-secondary {
@@ -851,15 +852,15 @@ body {
 
 .activity-controls .btn-primary,
 .activity-actions .btn-primary {
-  background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+  background: linear-gradient(135deg, #FA0F00 0%, #D60A00 100%);
   color: white;
-  box-shadow: 0 2px 4px rgba(220, 38, 38, 0.2);
+  box-shadow: 0 2px 4px rgba(250, 15, 0, 0.2);
 }
 
 .activity-controls .btn-primary:hover,
 .activity-actions .btn-primary:hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(220, 38, 38, 0.3);
+  box-shadow: 0 4px 8px rgba(250, 15, 0, 0.3);
 }
 
 .activity-controls .btn-secondary,
@@ -1151,14 +1152,14 @@ body {
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+  background: linear-gradient(135deg, #FA0F00 0%, #D60A00 100%);
   color: white;
-  box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
+  box-shadow: 0 2px 4px rgba(250, 15, 0, 0.2);
 }
 
 .btn-primary:hover {
-  background: linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%);
-  box-shadow: 0 3px 6px rgba(37, 99, 235, 0.3);
+  background: linear-gradient(135deg, #D60A00 0%, #B60800 100%);
+  box-shadow: 0 3px 6px rgba(250, 15, 0, 0.3);
   transform: translateY(-1px);
 }
 
