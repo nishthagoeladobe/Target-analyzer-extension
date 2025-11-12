@@ -2127,6 +2127,11 @@ body {
   font-weight: 600;
 }
 
+.performance-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .btn-refresh {
   background: white;
   color: #2563eb;
@@ -2142,6 +2147,29 @@ body {
 .btn-refresh:hover {
   transform: translateY(-1px);
   box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+}
+
+.btn-audit-report {
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 2px 4px rgba(124, 58, 237, 0.2);
+}
+
+.btn-audit-report:hover {
+  background: linear-gradient(135deg, #6d28d9 0%, #4c1d95 100%);
+  box-shadow: 0 3px 6px rgba(124, 58, 237, 0.3);
+  transform: translateY(-1px);
+}
+
+.btn-audit-report:active {
+  transform: translateY(0);
 }
 
 .performance-summary {
