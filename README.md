@@ -89,6 +89,7 @@ Adobe Target Activity Inspector provides **real-time visibility** into Adobe Tar
 - ✅ **Server-side** — Detects server-side Target calls
 - ✅ **Hybrid setups** — Mixed at.js and Alloy.js on same page
 - ✅ **CNAME domains** — Custom domain implementations
+- ✅ **Strict CSP sites** — Works on Content Security Policy restricted sites
 
 ---
 
@@ -456,6 +457,24 @@ Target-analyzer-extension/
 
 ## Troubleshooting
 
+### Known Behaviors (Not Bugs)
+
+These are expected behaviors that don't require fixing:
+
+| Behavior | Explanation |
+|----------|-------------|
+| "Developer mode" warning | Normal when loading unpacked extensions |
+| Console logs appearing | Intentional for debugging purposes |
+| "No Activity" message | Correct behavior for pages without Target |
+
+### Recommended Test Sites
+
+Try the extension on these sites known to have Adobe Target:
+
+- **Bank of America** (bankofamerica.com) — Alloy.js implementation
+- **Macy's** (macys.com) — Strict CSP compliance test
+- **Your own website** — Best for testing your implementation
+
 ### Common Issues
 
 <details>
@@ -507,6 +526,28 @@ Target-analyzer-extension/
 2. Check console for errors (right-click popup → Inspect)
 3. Verify all permissions are granted
 4. Try on a different website with Adobe Target
+
+</details>
+
+<details>
+<summary><strong>"Extension not loading after manual install"</strong></summary>
+
+**Solutions**:
+1. Make sure you **extracted** the .zip file first (don't load the .zip directly)
+2. Select the folder containing `manifest.json`
+3. Enable "Developer mode" toggle in chrome://extensions
+4. If you make changes, click "Reload" on the extension card
+
+</details>
+
+<details>
+<summary><strong>"Snippet test stuck"</strong></summary>
+
+**Solutions**:
+1. Clear browser cache first (Settings → Clear browsing data)
+2. Make sure the page has Target activities
+3. Check console for error messages
+4. Try the "Cancel Test" button and restart
 
 </details>
 
@@ -599,7 +640,11 @@ Please include:
 - ✅ IDs Tab: Visitor identifier display
 - ✅ Download Audit Report: Comprehensive CSV export
 - ✅ Workflow Steps: Visual progress indicator
-- ✅ Enhanced UI: Modern sidebar navigation
+- ✅ Enhanced UI: Modern sidebar navigation with navy blue theme
+- ✅ Professional compact design (30% more space-efficient)
+- ✅ CSP compliance: Works on strict Content Security Policy sites
+- ✅ Activity validation: No false positives
+- ✅ Early prehiding removal: Improved snippet test accuracy
 
 ### v1.0.3
 - ✅ Flicker Test Feature: A/B test prehiding snippet
