@@ -21,39 +21,96 @@
       </div>
     </header>
 
-    <div class="tabs">
-      <button class="tab-button active" data-tab="activities">Activities</button>
-      <button class="tab-button" data-tab="events">Events</button>
-      <button class="tab-button" data-tab="details">Details</button>
-      <button class="tab-button" data-tab="performance">Performance</button>
-      <button class="tab-button" data-tab="snippettest">Snippet Test</button>
-      <button class="tab-button" data-tab="explanation">Explanation</button>
-    </div>
+    <div class="main-layout">
+      <!-- Sidebar Navigation -->
+      <nav class="sidebar">
+        <div class="sidebar-section">
+          <div class="sidebar-section-title">ANALYZE</div>
+          <button class="sidebar-item active" data-view="activities" data-requires="none">
+            <span class="sidebar-icon">🎯</span>
+            <span class="sidebar-label">Activities</span>
+            <span class="sidebar-badge" id="activitiesBadge">0</span>
+          </button>
+        </div>
 
-    <div class="tab-content">
-      <!-- Activities Tab -->
-      <div id="activities" class="tab-panel active">
-        <div class="activity-summary" id="activitySummary">
-          <div class="summary-card">
-            <div class="summary-number" id="totalActivities">0</div>
-            <div class="summary-label">Total Activities</div>
+          <div class="sidebar-section">
+            <div class="sidebar-section-title">TOOLS</div>
+            <button class="sidebar-item" data-view="events" data-requires="none">
+              <span class="sidebar-icon">📡</span>
+              <span class="sidebar-label">Events</span>
+              <span class="sidebar-badge" id="eventsBadge">0</span>
+            </button>
+            <button class="sidebar-item" data-view="ids" data-requires="none">
+              <span class="sidebar-icon">🆔</span>
+              <span class="sidebar-label">IDs</span>
+            </button>
+            <button class="sidebar-item" data-view="performance" data-requires="monitoring">
+              <span class="sidebar-icon">⚡</span>
+              <span class="sidebar-label">Performance</span>
+              <span class="sidebar-lock">🔒</span>
+            </button>
+            <button class="sidebar-item" data-view="snippettest" data-requires="monitoring">
+              <span class="sidebar-icon">🧪</span>
+              <span class="sidebar-label">Snippet Test</span>
+              <span class="sidebar-lock">🔒</span>
+            </button>
           </div>
-          <div class="summary-card">
-            <div class="summary-number" id="activeMboxes">0</div>
-            <div class="summary-label">Active Mboxes</div>
+
+        <div class="sidebar-section sidebar-bottom">
+          <button class="sidebar-item" data-view="help" data-requires="none">
+            <span class="sidebar-icon">ℹ️</span>
+            <span class="sidebar-label">Help</span>
+          </button>
+        </div>
+      </nav>
+
+      <!-- Main Content Area -->
+      <main class="content-area">
+
+        <!-- Workflow Steps Indicator -->
+        <div class="workflow-steps" id="workflowSteps">
+          <div class="workflow-step active" data-step="1">
+            <div class="step-number">1</div>
+            <div class="step-label">Start Monitoring</div>
+          </div>
+          <div class="workflow-arrow">→</div>
+          <div class="workflow-step" data-step="2">
+            <div class="step-number">2</div>
+            <div class="step-label">Detect Activities</div>
+          </div>
+          <div class="workflow-arrow">→</div>
+          <div class="workflow-step" data-step="3">
+            <div class="step-number">3</div>
+            <div class="step-label">Analyze Data</div>
           </div>
         </div>
 
-        <div class="activity-actions" id="activityActions" style="display: none;">
-          <button class="btn-primary" id="analyzePerformance">
-            ⚡ Analyze Target Performance
-          </button>
-          <button class="btn-primary" id="testSnippetImpact" style="background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%);">
-            🧪 Test Prehiding Snippet Impact
-          </button>
-          <button class="btn-secondary copy-all-btn" id="copyAllActivities">
-            📊 Download Complete Report (CSV)
-          </button>
+        <!-- Activities View -->
+        <div id="activities" class="view-panel active">
+        <!-- Sticky Header with Summary and Actions -->
+        <div class="activities-sticky-header">
+          <div class="activity-summary" id="activitySummary">
+            <div class="summary-card">
+              <div class="summary-number" id="totalActivities">0</div>
+              <div class="summary-label">Activities</div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-number" id="activeMboxes">0</div>
+              <div class="summary-label">Mboxes</div>
+            </div>
+          </div>
+
+          <div class="activity-actions-compact" id="activityActions" style="display: none;">
+            <button class="btn-icon" id="analyzePerformance" title="Analyze Target Performance">
+              ⚡
+            </button>
+            <button class="btn-icon" id="testSnippetImpact" title="Test Prehiding Snippet Impact">
+              🧪
+            </button>
+            <button class="btn-icon" id="copyAllActivities" title="Download Complete Report (CSV)">
+              📊
+            </button>
+          </div>
         </div>
 
         <div class="loading-container" id="loadingContainer" style="display: none;">
@@ -72,17 +129,15 @@
           </div>
         </div>
 
-        <!-- Activities Tab Controls -->
+        <!-- Sticky Bottom Controls -->
         <div class="activities-controls">
-          <div class="controls">
-            <button id="clearActivities" class="btn btn-secondary">Clear Activities</button>
-            <button id="refreshActivities" class="btn btn-primary">🔍 Start Monitoring & Reload</button>
-          </div>
+          <button id="clearActivities" class="btn-control btn-secondary">Clear</button>
+          <button id="refreshActivities" class="btn-control btn-primary">🔍 Start Monitoring</button>
         </div>
       </div>
 
-      <!-- Events Tab -->
-      <div id="events" class="tab-panel">
+        <!-- Events View -->
+        <div id="events" class="view-panel">
         <div class="events-header">
           <h2>📡 Network Events</h2>
           <p class="events-subtitle">All Adobe Target network requests and interactions</p>
@@ -103,15 +158,6 @@
           </div>
         </div>
 
-        <div class="events-controls">
-          <button id="refreshEvents" class="btn-primary">
-            🔄 Refresh Events
-          </button>
-          <button id="clearEvents" class="btn-secondary">
-            Clear Events
-          </button>
-        </div>
-
         <div class="events-list" id="eventsList">
           <div class="empty-state">
             <div class="empty-icon">📡</div>
@@ -121,8 +167,24 @@
         </div>
       </div>
 
+      <!-- IDs Tab -->
+      <div id="ids" class="view-panel">
+        <div class="ids-header">
+          <h2>🆔 Visitor IDs</h2>
+          <p class="ids-subtitle">Adobe Target and Experience Cloud visitor identifiers</p>
+        </div>
+
+        <div class="ids-content-scroll" id="idsContentScroll">
+          <div class="empty-state">
+            <div class="empty-icon">🆔</div>
+            <h3>No IDs detected yet</h3>
+            <p>Start monitoring to capture visitor identifiers.</p>
+          </div>
+        </div>
+      </div>
+
       <!-- Details Tab -->
-      <div id="details" class="tab-panel">
+      <div id="details" class="view-panel">
         <div id="detailsContent" class="details-content">
           <div class="empty-details">
             <div class="empty-icon">📋</div>
@@ -133,7 +195,7 @@
       </div>
 
       <!-- Performance Tab -->
-      <div id="performance" class="tab-panel">
+      <div id="performance" class="view-panel">
         <div class="performance-header">
           <h2>⚡ Performance Metrics</h2>
           <div class="performance-actions">
@@ -142,6 +204,7 @@
           </div>
         </div>
 
+        <div class="performance-content-scroll">
         <!-- Guidance Banner - shown when no data -->
         <div class="performance-guidance-banner" id="performanceGuidanceBanner">
           <div class="guidance-icon">ℹ️</div>
@@ -306,15 +369,18 @@
             </div>
           </div>
         </div>
+        </div>
+        <!-- End performance-content-scroll -->
       </div>
 
       <!-- Prehiding Snippet Test Tab -->
-      <div id="snippettest" class="tab-panel">
+      <div id="snippettest" class="view-panel">
         <div class="flicker-test-header">
           <h2>🧪 Prehiding Snippet Performance Test</h2>
           <p class="flicker-test-subtitle">Measure Adobe Target's complete performance impact: WITH vs WITHOUT prehiding snippet</p>
         </div>
 
+        <div class="snippet-content-scroll">
         <!-- Snippet Status Section -->
         <div class="flicker-section">
           <h3>📋 Current Status</h3>
@@ -597,10 +663,12 @@
             <p><strong>With the snippet:</strong> Page hidden → personalized content loads → page shows (no flicker)</p>
           </div>
         </div>
+        </div>
+        <!-- End snippet-content-scroll -->
       </div>
 
       <!-- Explanation Tab -->
-      <div id="explanation" class="tab-panel">
+      <div id="explanation" class="view-panel">
         <div class="explanation-content">
           <h2>🎯 What is Adobe Target?</h2>
           <p>Adobe Target is a tool that helps websites show different content to different visitors to improve their experience and increase business results.</p>
@@ -776,10 +844,15 @@
             </div>
           </div>
         </div>
-      </div>
+        <!-- End Help View -->
+
+      </main>
+      <!-- End Content Area -->
     </div>
+    <!-- End Main Layout -->
 
   </div>
+  <!-- End Container -->
 
   <script src="popup.js"></script>
 </body>

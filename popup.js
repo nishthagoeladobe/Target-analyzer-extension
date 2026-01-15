@@ -137,6 +137,283 @@ class TargetPopup {
     }
   }
 
+  async loadVisitorIds() {
+    try {
+      const response = await chrome.runtime.sendMessage({ 
+        type: 'GET_ACTIVITIES',
+        tabId: this.currentTabId 
+      });
+      
+      if (response && response.activities) {
+        this.displayVisitorIds(response.activities);
+      } else {
+        this.displayVisitorIds([]);
+      }
+      
+    } catch (error) {
+      console.error('Error loading visitor IDs:', error);
+      this.displayVisitorIds([]);
+    }
+  }
+
+  displayVisitorIds(activities) {
+    const container = document.getElementById('idsContentScroll');
+    if (!container) return;
+    
+    // Extract IDs from activities
+    const ids = this.extractAllVisitorIds(activities);
+    
+    // If no IDs found, show empty state
+    if (Object.keys(ids).length === 0) {
+      container.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">🆔</div>
+          <h3>No IDs detected yet</h3>
+          <p>Start monitoring to capture visitor identifiers.</p>
+        </div>
+      `;
+      return;
+    }
+    
+    // Build dynamic ID sections
+    let html = '';
+    for (const [key, value] of Object.entries(ids)) {
+      if (value && value !== '-') {
+        const displayName = this.formatIdName(key);
+        html += `
+          <div class="id-section">
+            <div class="id-section-header">
+              <h3>${displayName}</h3>
+            </div>
+            <div class="id-card">
+              <div class="id-value-container">
+                <div class="id-value">${this.escapeHtml(value)}</div>
+                <button class="id-copy-btn-dynamic" data-copy-value="${this.escapeHtml(value)}" title="Copy ${displayName}">
+                  <span class="copy-icon">📋</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+    }
+    
+    container.innerHTML = html;
+    
+    // Add copy button handlers
+    container.querySelectorAll('.id-copy-btn-dynamic').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        const value = btn.dataset.copyValue;
+        if (value) {
+          try {
+            await navigator.clipboard.writeText(value);
+            const originalHTML = btn.innerHTML;
+            btn.innerHTML = '<span class="copy-icon">✓</span>';
+            setTimeout(() => {
+              btn.innerHTML = originalHTML;
+            }, 2000);
+          } catch (err) {
+            console.error('Failed to copy:', err);
+          }
+        }
+      });
+    });
+  }
+
+  formatIdName(key) {
+    // Convert camelCase or snake_case to readable format
+    const formatted = key
+      .replace(/([A-Z])/g, ' $1') // Add space before capitals
+      .replace(/_/g, ' ')          // Replace underscores with spaces
+      .replace(/\./g, ' ')         // Replace dots with spaces
+      .toUpperCase()
+      .trim();
+    
+    return formatted;
+  }
+
+  extractAllVisitorIds(activities) {
+    const ids = {};
+    
+    if (!activities || activities.length === 0) return ids;
+    
+    // Process all activities to find all possible IDs
+    activities.forEach(activity => {
+      // Extract from URL parameters
+      if (activity.url) {
+        this.extractIdsFromUrl(activity.url, ids);
+      }
+      
+      // Extract from request payload
+      if (activity.requestDetails && activity.requestDetails.payload) {
+        this.extractIdsFromPayload(activity.requestDetails.payload, ids);
+      }
+      
+      // Extract from response
+      if (activity.responseDetails) {
+        this.extractIdsFromResponse(activity.responseDetails, ids);
+      }
+      
+      // Extract from details
+      if (activity.details) {
+        if (activity.details.clientCode && !ids.clientCode) {
+          ids.clientCode = activity.details.clientCode;
+        }
+        if (activity.details.requestId && !ids.sessionId) {
+          ids.sessionId = activity.details.requestId;
+        }
+      }
+    });
+    
+    return ids;
+  }
+
+  extractIdsFromUrl(url, ids) {
+    // Common URL patterns to extract
+    const patterns = [
+      { key: 'client', name: 'clientCode' },
+      { key: 'sessionId', name: 'sessionId' },
+      { key: 'mboxPC', name: 'mboxPC' },
+      { key: 'marketingCloudVisitorId', name: 'ECID' },
+      { key: 'mbox3rdPartyId', name: 'mbox3rdPartyId' },
+      { key: 'mboxMCGVID', name: 'MCGVID' },
+      { key: 'mboxAAMB', name: 'AAMB' },
+      { key: 'mboxMCSDID', name: 'MCSDID' },
+      { key: 'vst.trk', name: 'vst.trk' },
+      { key: 'vst.trks', name: 'vst.trks' }
+    ];
+    
+    patterns.forEach(({ key, name }) => {
+      if (!ids[name]) {
+        const regex = new RegExp(`${key}=([^&]+)`, 'i');
+        const match = url.match(regex);
+        if (match) {
+          ids[name] = decodeURIComponent(match[1]);
+        }
+      }
+    });
+  }
+
+  extractIdsFromPayload(payload, ids) {
+    // For at.js delivery calls
+    if (payload.id) {
+      if (payload.id.tntId && !ids.tntId) {
+        ids.tntId = payload.id.tntId;
+      }
+      if (payload.id.marketingCloudVisitorId && !ids.ECID) {
+        ids.ECID = payload.id.marketingCloudVisitorId;
+      }
+      if (payload.id.thirdPartyId && !ids.thirdPartyId) {
+        ids.thirdPartyId = payload.id.thirdPartyId;
+      }
+      if (payload.id.customerIds && !ids.customerIds) {
+        ids.customerIds = JSON.stringify(payload.id.customerIds);
+      }
+    }
+    
+    // For WebSDK/Alloy calls
+    if (payload.xdm && payload.xdm.identityMap) {
+      const identityMap = payload.xdm.identityMap;
+      
+      // Extract all identity types
+      Object.keys(identityMap).forEach(idType => {
+        const idArray = identityMap[idType];
+        if (Array.isArray(idArray) && idArray.length > 0) {
+          const idKey = idType;
+          if (!ids[idKey] && idArray[0].id) {
+            ids[idKey] = idArray[0].id;
+          }
+        }
+      });
+    }
+    
+    // Extract FPID if present
+    if (payload.fpid && !ids.FPID) {
+      ids.FPID = payload.fpid;
+    }
+    
+    // Extract kndctr identifiers
+    if (payload.meta) {
+      Object.keys(payload.meta).forEach(key => {
+        if (key.includes('kndctr') || key.includes('identity')) {
+          if (!ids[key]) {
+            ids[key] = typeof payload.meta[key] === 'object' ? 
+              JSON.stringify(payload.meta[key]) : payload.meta[key];
+          }
+        }
+      });
+    }
+  }
+
+  extractIdsFromResponse(response, ids) {
+    // Extract from at.js response
+    if (response.id) {
+      if (response.id.tntId && !ids.tntId) {
+        ids.tntId = response.id.tntId;
+      }
+      if (response.id.marketingCloudVisitorId && !ids.ECID) {
+        ids.ECID = response.id.marketingCloudVisitorId;
+      }
+      if (response.id.thirdPartyId && !ids.thirdPartyId) {
+        ids.thirdPartyId = response.id.thirdPartyId;
+      }
+    }
+    
+    // Parse response if it's a string
+    let parsedResponse = response;
+    if (typeof response === 'string') {
+      try {
+        parsedResponse = JSON.parse(response);
+      } catch (e) {
+        // Not JSON, skip
+        return;
+      }
+    }
+    
+    // Extract state:store (WebSDK response)
+    if (parsedResponse.handle && Array.isArray(parsedResponse.handle)) {
+      parsedResponse.handle.forEach(item => {
+        // Process state:store type
+        if (item.type === 'state:store' && item.payload && Array.isArray(item.payload)) {
+          item.payload.forEach(entry => {
+            if (entry.key && entry.value) {
+              // Extract meaningful ID name from key
+              let idName = entry.key;
+              
+              // Handle mbox key format: mbox/session#... or mbox/mboxEdgeCluster
+              if (entry.key === 'mbox' && typeof entry.value === 'string') {
+                // This is the session ID
+                ids.mboxSessionId = entry.value;
+              } else if (entry.key === 'mboxEdgeCluster' && typeof entry.value === 'string') {
+                ids.mboxEdgeCluster = entry.value;
+              } else {
+                // Generic key-value storage
+                const cleanKey = entry.key.replace(/\//g, '.').replace(/^\./, '');
+                if (!ids[cleanKey]) {
+                  ids[cleanKey] = typeof entry.value === 'object' ? 
+                    JSON.stringify(entry.value) : String(entry.value);
+                }
+              }
+            }
+          });
+        }
+        
+        // Process identity:result type
+        if (item.type === 'identity:result' && item.payload && Array.isArray(item.payload)) {
+          item.payload.forEach(identity => {
+            if (identity.id && identity.namespace) {
+              const idKey = identity.namespace.code || identity.namespace;
+              if (!ids[idKey]) {
+                ids[idKey] = identity.id;
+              }
+            }
+          });
+        }
+      });
+    }
+  }
+
   displayNetworkEvents() {
     const eventsList = document.getElementById('eventsList');
     const totalEventsEl = document.getElementById('totalEvents');
@@ -165,33 +442,42 @@ class TargetPopup {
       return;
     }
 
-    eventsList.innerHTML = this.networkEvents.map(event => {
+    eventsList.innerHTML = this.networkEvents.map((event, index) => {
       const eventTypeClass = event.type === 'interact' ? 'interact' : event.type === 'delivery' ? 'delivery' : 'other';
       const statusClass = event.status === 'success' ? 'success' : event.status === 'error' ? 'error' : 'pending';
       const formattedTimestamp = new Date(event.timestamp).toLocaleTimeString();
+      const eventDisplayName = event.eventType || 'Unknown Event';
       
       return `
-        <div class="event-item" data-event-id="${event.id}">
+        <div class="event-item" data-event-id="${event.id}" data-event-index="${index}">
           <div class="event-header">
             <div class="event-type">
-              <span class="event-type-badge ${eventTypeClass}">${event.type.toUpperCase()}</span>
-              <span class="event-name">${this.escapeHtml(event.eventType)}</span>
+              <span class="event-type-badge ${eventTypeClass}">EVENT</span>
+              <span class="event-name" title="${this.escapeHtml(eventDisplayName)}">${this.escapeHtml(eventDisplayName)}</span>
             </div>
             <div class="event-meta">
-              <span>⏰ ${formattedTimestamp}</span>
-              <span class="event-status-badge ${statusClass}">${event.statusCode || event.status}</span>
+              <button class="event-copy-btn" data-event-copy="${index}" title="Copy Event Data">
+                <span class="copy-icon">⤢</span>
+              </button>
               <span class="event-expand-icon">▶</span>
             </div>
           </div>
           <div class="event-details">
             <div class="event-details-inner">
               <div class="event-details-section">
-                <div class="event-details-title">🌐 URL</div>
+                <div class="event-details-title">Event Type</div>
+                <div class="event-details-content">${this.escapeHtml(eventDisplayName)}</div>
+              </div>
+              <div class="event-details-section">
+                <div class="event-details-title">Request Type</div>
+                <div class="event-details-content">${event.type.toUpperCase()} (${event.type === 'interact' ? 'Alloy.js/WebSDK' : 'at.js Delivery'})</div>
+              </div>
+              <div class="event-details-section">
+                <div class="event-details-title">URL</div>
                 <div class="event-details-content">${this.escapeHtml(event.url)}</div>
               </div>
-              
               <div class="event-details-section">
-                <div class="event-details-title">📊 Timing</div>
+                <div class="event-details-title">Method & Status</div>
                 <div class="event-timing-grid">
                   <div class="event-timing-item">
                     <div class="event-timing-label">Method</div>
@@ -211,17 +497,15 @@ class TargetPopup {
                   </div>
                 </div>
               </div>
-              
               ${event.requestInfo && event.requestInfo.postData && event.requestInfo.postData.text ? `
               <div class="event-details-section">
-                <div class="event-details-title">📤 Request Body</div>
+                <div class="event-details-title">Request Payload</div>
                 <div class="event-details-content">${this.escapeHtml(JSON.stringify(JSON.parse(event.requestInfo.postData.text), null, 2))}</div>
               </div>
               ` : ''}
-              
               ${event.responseHeaders ? `
               <div class="event-details-section">
-                <div class="event-details-title">📥 Response Headers</div>
+                <div class="event-details-title">Response Headers</div>
                 <div class="event-details-content">${this.escapeHtml(JSON.stringify(event.responseHeaders, null, 2))}</div>
               </div>
               ` : ''}
@@ -233,18 +517,64 @@ class TargetPopup {
 
     // Add click handlers for expand/collapse
     eventsList.querySelectorAll('.event-item').forEach(item => {
-      item.addEventListener('click', (e) => {
-        // Toggle expanded state
+      const header = item.querySelector('.event-header');
+      const copyBtn = item.querySelector('.event-copy-btn');
+      
+      header.addEventListener('click', (e) => {
+        if (e.target.closest('.event-copy-btn')) return;
         item.classList.toggle('expanded');
       });
+      
+      if (copyBtn) {
+        copyBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const eventIndex = parseInt(copyBtn.dataset.eventCopy);
+          const event = this.networkEvents[eventIndex];
+          if (event) {
+            await this.copyEventToClipboard(event);
+            copyBtn.innerHTML = '<span class="copy-icon">✓</span>';
+            setTimeout(() => {
+              copyBtn.innerHTML = '<span class="copy-icon">⤢</span>';
+            }, 2000);
+          }
+        });
+      }
     });
   }
 
+  async copyEventToClipboard(event) {
+    const eventData = {
+      eventType: event.eventType,
+      type: event.type,
+      url: event.url,
+      method: event.method,
+      timestamp: new Date(event.timestamp).toISOString(),
+      status: event.status,
+      statusCode: event.statusCode
+    };
+    
+    if (event.requestInfo && event.requestInfo.postData && event.requestInfo.postData.text) {
+      try {
+        eventData.requestPayload = JSON.parse(event.requestInfo.postData.text);
+      } catch (e) {
+        eventData.requestPayload = event.requestInfo.postData.text;
+      }
+    }
+    
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(eventData, null, 2));
+      console.log('Event copied to clipboard');
+    } catch (err) {
+      console.error('Failed to copy event:', err);
+    }
+  }
+
   bindEvents() {
-    // Tab switching
-    document.querySelectorAll('.tab-button').forEach(button => {
-      button.addEventListener('click', (e) => {
-        this.switchTab(e.target.dataset.tab);
+    // Sidebar navigation
+    document.querySelectorAll('.sidebar-item').forEach(item => {
+      item.addEventListener('click', (e) => {
+        const view = e.currentTarget.dataset.view;
+        this.switchView(view);
       });
     });
 
@@ -527,6 +857,86 @@ class TargetPopup {
         this.detectPrehidingSnippet();
       }, 100);
     });
+
+    // Setup scroll listener for compact header mode
+    this.setupScrollListener();
+  }
+
+  setupScrollListener() {
+    // Activity List scroll listener
+    const activityList = document.querySelector('.activity-list');
+    const workflowSteps = document.querySelector('.workflow-steps');
+    const activitiesStickyHeader = document.querySelector('.activities-sticky-header');
+    
+    if (activityList) {
+      activityList.addEventListener('scroll', () => {
+        const scrollTop = activityList.scrollTop;
+        
+        // Toggle compact mode when scrolled down more than 50px
+        if (scrollTop > 50) {
+          workflowSteps?.classList.add('compact');
+          activitiesStickyHeader?.classList.add('compact');
+        } else {
+          workflowSteps?.classList.remove('compact');
+          activitiesStickyHeader?.classList.remove('compact');
+        }
+      });
+    }
+
+    // Events List scroll listener
+    const eventsList = document.querySelector('.events-list');
+    const eventsHeader = document.querySelector('.events-header');
+    const eventsSummary = document.querySelector('.events-summary');
+    
+    if (eventsList) {
+      eventsList.addEventListener('scroll', () => {
+        const scrollTop = eventsList.scrollTop;
+        
+        // Toggle compact mode when scrolled down more than 30px
+        if (scrollTop > 30) {
+          eventsHeader?.classList.add('compact');
+          eventsSummary?.classList.add('compact');
+        } else {
+          eventsHeader?.classList.remove('compact');
+          eventsSummary?.classList.remove('compact');
+        }
+      });
+    }
+
+    // Performance Content scroll listener
+    const performanceContent = document.querySelector('.performance-content-scroll');
+    const performanceHeader = document.querySelector('.performance-header');
+    
+    if (performanceContent) {
+      performanceContent.addEventListener('scroll', () => {
+        const scrollTop = performanceContent.scrollTop;
+        
+        // Toggle compact mode when scrolled down more than 30px
+        if (scrollTop > 30) {
+          performanceHeader?.classList.add('compact');
+        } else {
+          performanceHeader?.classList.remove('compact');
+        }
+      });
+    }
+
+    // Snippet Test Content scroll listener
+    const snippetContent = document.querySelector('.snippet-content-scroll');
+    const snippetHeader = document.querySelector('.flicker-test-header');
+    
+    if (snippetContent) {
+      snippetContent.addEventListener('scroll', () => {
+        const scrollTop = snippetContent.scrollTop;
+        
+        // Toggle compact mode when scrolled down more than 30px
+        if (scrollTop > 30) {
+          snippetHeader?.classList.add('compact');
+        } else {
+          snippetHeader?.classList.remove('compact');
+        }
+      });
+    }
+
   }
 
   async waitForActivitiesAfterReload() {
@@ -605,13 +1015,233 @@ class TargetPopup {
     checkForActivities();
   }
 
+  switchView(viewName) {
+    console.log('🔄 Switching to view:', viewName);
+    
+    // Check if view is locked
+    const targetItem = document.querySelector(`.sidebar-item[data-view="${viewName}"]`);
+    if (targetItem && targetItem.classList.contains('locked')) {
+      // Show tooltip explaining why it's locked
+      this.showLockedViewNotification(targetItem);
+      return;
+    }
+
+    // Update sidebar active state
+    document.querySelectorAll('.sidebar-item').forEach(item => {
+      item.classList.toggle('active', item.dataset.view === viewName);
+    });
+    
+    // Update view panels
+    document.querySelectorAll('.view-panel').forEach(panel => {
+      panel.classList.toggle('active', panel.id === viewName);
+    });
+
+    // Load data when switching to specific views
+    switch(viewName) {
+      case 'activities':
+        // Activities data is already loaded
+        break;
+      case 'events':
+        this.loadNetworkEvents();
+        break;
+      case 'ids':
+        this.loadVisitorIds();
+        break;
+      case 'performance':
+        // Load basic page metrics (can work without activities)
+        this.loadBasicPageMetrics().catch(err => {
+          console.error('Error loading performance metrics:', err);
+        });
+        break;
+      case 'snippettest':
+        // Load snippet test data
+        this.loadSnippetTestTab();
+        break;
+      case 'help':
+        // Help is static content
+        break;
+    }
+  }
+
+  // Legacy compatibility - redirect old switchTab calls to switchView
   switchTab(tabName) {
-    document.querySelectorAll('.tab-button').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.tab === tabName);
+    this.switchView(tabName);
+  }
+
+  async loadSnippetTestTab() {
+    console.log('🧪 Loading Snippet Test tab...');
+    
+    try {
+      // Check if there are existing test results
+      const storage = await chrome.storage.local.get(['flickerTestResults', 'flickerTestTabId', 'flickerTestUrl']);
+      
+      if (storage.flickerTestResults) {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        const currentUrl = tab.url;
+        const currentTabId = tab.id;
+        
+        // Check if results match current tab/URL
+        const savedUrlBase = storage.flickerTestUrl ? storage.flickerTestUrl.split('?')[0].split('#')[0] : '';
+        const currentUrlBase = currentUrl ? currentUrl.split('?')[0].split('#')[0] : '';
+        
+        if (storage.flickerTestTabId === currentTabId && savedUrlBase === currentUrlBase) {
+          console.log('✅ Found existing test results for this page');
+          this.displayFlickerTestResults(storage.flickerTestResults);
+          return;
+        }
+      }
+      
+      // No existing results, detect snippet and show ready state
+      await this.detectPrehidingSnippet();
+      this.showFlickerTestReady();
+      
+    } catch (error) {
+      console.error('❌ Error loading snippet test tab:', error);
+    }
+  }
+
+  showLockedViewNotification(item) {
+    const requirement = item.getAttribute('data-requires');
+    const viewName = item.getAttribute('data-view');
+    let message = '';
+    
+    switch(requirement) {
+      case 'monitoring':
+        message = '⚠️ Please start monitoring first by clicking "🔍 Start Monitoring & Reload" in Activities';
+        break;
+      case 'activities':
+        message = '⚠️ Please detect activities first by monitoring the page';
+        break;
+      default:
+        message = '⚠️ This view requires prerequisites to be completed first';
+    }
+    
+    // Legacy support
+    this.showLockedTabNotification = (button) => this.showLockedViewNotification(button);
+    
+    // Show temporary notification
+    const notification = document.createElement('div');
+    notification.className = 'tab-locked-notification';
+    notification.textContent = message;
+    notification.style.cssText = `
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: linear-gradient(135deg, #fef3c7 0%, #fef9c3 100%);
+      border: 2px solid #fbbf24;
+      color: #78350f;
+      padding: 16px 20px;
+      border-radius: 12px;
+      font-size: 13px;
+      font-weight: 600;
+      text-align: center;
+      z-index: 10000;
+      box-shadow: 0 8px 24px rgba(251, 191, 36, 0.3);
+      max-width: 320px;
+      animation: slideDown 0.3s ease;
+    `;
+    
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+      notification.style.animation = 'slideUp 0.3s ease';
+      setTimeout(() => notification.remove(), 300);
+    }, 3000);
+  }
+
+  updateWorkflowSteps() {
+    console.log('🔄 updateWorkflowSteps called', { isDebugging: this.isDebugging, activities: this.activities?.length });
+    
+    const isMonitoring = this.isDebugging;
+    const hasActivities = this.activities && this.activities.length > 0;
+    
+    const step1 = document.querySelector('.workflow-step[data-step="1"]');
+    const step2 = document.querySelector('.workflow-step[data-step="2"]');
+    const step3 = document.querySelector('.workflow-step[data-step="3"]');
+    
+    console.log('📍 Workflow steps elements:', { step1, step2, step3 });
+    
+    // Update Step 1: Start Monitoring
+    if (isMonitoring) {
+      step1?.classList.add('completed');
+      step1?.classList.remove('active');
+    } else {
+      step1?.classList.add('active');
+      step1?.classList.remove('completed');
+    }
+    
+    // Update Step 2: Detect Activities
+    if (hasActivities) {
+      step2?.classList.add('completed');
+      step2?.classList.remove('active');
+    } else if (isMonitoring) {
+      step2?.classList.add('active');
+      step2?.classList.remove('completed');
+    } else {
+      step2?.classList.remove('active', 'completed');
+    }
+    
+    // Update Step 3: Analyze Data
+    if (hasActivities) {
+      step3?.classList.add('active');
+      step3?.classList.remove('completed');
+    } else {
+      step3?.classList.remove('active', 'completed');
+    }
+  }
+
+  updateSidebarStates() {
+    console.log('🔐 updateSidebarStates called', { isMonitoring: this.isDebugging, hasActivities: this.activities?.length > 0 });
+    
+    const isMonitoring = this.isDebugging;
+    const hasActivities = this.activities && this.activities.length > 0;
+    
+    const items = document.querySelectorAll('.sidebar-item');
+    console.log('📍 Found sidebar items:', items.length);
+    
+    // Update activities badge
+    const activitiesBadge = document.getElementById('activitiesBadge');
+    if (activitiesBadge) {
+      activitiesBadge.textContent = this.activities?.length || 0;
+    }
+    
+    // Update events badge
+    const eventsBadge = document.getElementById('eventsBadge');
+    if (eventsBadge) {
+      eventsBadge.textContent = this.networkEvents?.length || 0;
+    }
+    
+    items.forEach(item => {
+      const requirement = item.getAttribute('data-requires');
+      
+      if (requirement === 'none') {
+        // Always available
+        item.classList.remove('locked');
+        return;
+      }
+      
+      if (requirement === 'monitoring') {
+        if (isMonitoring) {
+          item.classList.remove('locked');
+        } else {
+          item.classList.add('locked');
+        }
+      }
+      
+      if (requirement === 'activities') {
+        if (hasActivities) {
+          item.classList.remove('locked');
+        } else {
+          item.classList.add('locked');
+        }
+      }
     });
-    document.querySelectorAll('.tab-panel').forEach(panel => {
-      panel.classList.toggle('active', panel.id === tabName);
-    });
+  }
+
+  // Legacy compatibility
+  updateTabStates() {
+    this.updateSidebarStates();
   }
 
   showManualMonitoringState() {
@@ -641,6 +1271,12 @@ class TargetPopup {
     // Update status
     const statusText = document.getElementById('statusText');
     if (statusText) statusText.textContent = 'Ready to monitor - Click Start Monitoring & Reload';
+    
+    // Initialize workflow and sidebar states
+    this.updateWorkflowSteps();
+    this.updateSidebarStates();
+    
+    this.updateActivityList();
   }
 
   showDebuggerDisabledState() {
@@ -728,26 +1364,173 @@ class TargetPopup {
       activityList.style.display = 'block';
       activityList.innerHTML = this.activities.map(activity => `
         <div class="activity-item" data-activity-id="${activity.id}">
-          <div class="activity-content">
-            <div class="activity-name">${this.escapeHtml(activity.name)}</div>
-            <div class="activity-experience">Experience: ${this.escapeHtml(activity.experience)}</div>
-            <div class="activity-id">ID: ${activity.activityId || 'N/A'} | Status: ${activity.statusCode}</div>
+          <div class="activity-header">
+            <div class="activity-content">
+              <div class="activity-name">${this.escapeHtml(activity.name)}</div>
+              <div class="activity-experience">Experience: ${this.escapeHtml(activity.experience)}</div>
+              <div class="activity-id">ID: ${activity.activityId || 'N/A'} | Status: ${activity.statusCode}</div>
+            </div>
+            <div class="activity-header-right">
+              <div class="activity-badges">
+                <span class="call-type-badge ${activity.type.toLowerCase()}">${activity.type}</span>
+                <span class="implementation-badge ${activity.implementationType.toLowerCase()}">${activity.implementationType}</span>
+              </div>
+              <div class="activity-expand-indicator">
+                <span>Details</span>
+                <span class="activity-expand-icon">▶</span>
+              </div>
+            </div>
           </div>
-          <div class="activity-badges">
-            <span class="call-type-badge ${activity.type.toLowerCase()}">${activity.type}</span>
-            <span class="implementation-badge ${activity.implementationType.toLowerCase()}">${activity.implementationType}</span>
+          <div class="activity-details-panel">
+            <div class="activity-details-content">
+              ${this.generateActivityDetailsHTML(activity)}
+            </div>
           </div>
         </div>
       `).join('');
 
-      // Add click handlers
-      activityList.querySelectorAll('.activity-item').forEach(item => {
-        item.addEventListener('click', () => {
-          const activityId = item.dataset.activityId;
-          this.selectActivity(activityId);
+      // Add click handlers for expand/collapse
+      activityList.querySelectorAll('.activity-header').forEach(header => {
+        header.addEventListener('click', (e) => {
+          const item = header.closest('.activity-item');
+          this.toggleActivityExpand(item);
+        });
+      });
+
+      // Add click handlers for inline tabs
+      activityList.querySelectorAll('.detail-tab-btn-inline').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation(); // Prevent activity card from collapsing
+          const parentCard = btn.closest('.activity-item');
+          const tabName = btn.dataset.tab;
+          
+          // Update button states
+          parentCard.querySelectorAll('.detail-tab-btn-inline').forEach(b => {
+            b.classList.toggle('active', b.dataset.tab === tabName);
+          });
+          
+          // Update panel visibility
+          parentCard.querySelectorAll('.detail-tab-panel-inline').forEach(panel => {
+            panel.classList.toggle('active', panel.dataset.panel === tabName);
+          });
         });
       });
     }
+  }
+
+  toggleActivityExpand(activityItem) {
+    // Close other expanded items
+    document.querySelectorAll('.activity-item.expanded').forEach(item => {
+      if (item !== activityItem) {
+        item.classList.remove('expanded');
+      }
+    });
+    
+    // Toggle this item
+    activityItem.classList.toggle('expanded');
+  }
+
+  generateActivityDetailsHTML(activity) {
+    const mboxesHTML = activity.details?.mboxes && activity.details.mboxes.length > 0
+      ? activity.details.mboxes.map(mbox => `<span class="mbox-tag">${this.escapeHtml(mbox)}</span>`).join('')
+      : '<span class="no-data">No mboxes</span>';
+
+    const modificationsHTML = activity.details?.modifications && activity.details.modifications.length > 0
+      ? activity.details.modifications.slice(0, 3).map(mod => `
+          <div class="modification-item">
+            <div class="mod-type">${mod.type || 'setContent'}</div>
+            <div class="mod-selector">${this.escapeHtml(mod.selector || 'N/A')}</div>
+          </div>
+        `).join('')
+      : '<div class="no-data">No modifications detected</div>';
+
+    // Safe JSON stringification - use requestDetails and responseDetails
+    const requestJSON = activity.requestDetails ? JSON.stringify(activity.requestDetails, null, 2) : 'Request data not available';
+    const responseJSON = activity.responseDetails ? JSON.stringify(activity.responseDetails, null, 2) : 'Response data not available';
+
+    return `
+      <div class="detail-tabs-inline">
+        <div class="detail-tab-buttons">
+          <button class="detail-tab-btn-inline active" data-tab="overview">📊 Overview</button>
+          <button class="detail-tab-btn-inline" data-tab="request">📤 Request</button>
+          <button class="detail-tab-btn-inline" data-tab="response">📥 Response</button>
+          <button class="detail-tab-btn-inline" data-tab="tokens">🏷️ Tokens</button>
+        </div>
+
+        <div class="detail-tab-content-inline">
+          <div class="detail-tab-panel-inline active" data-panel="overview">
+            <div class="overview-section-inline">
+              <h4>🎯 Activity Information</h4>
+              <div class="info-grid">
+                <div class="info-item">
+                  <span class="info-label">Activity ID:</span>
+                  <span class="info-value">${activity.activityId || 'Not Available'}</span>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">Experience ID:</span>
+                  <span class="info-value">${activity.experienceId || 'Not Available'}</span>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">Detected At:</span>
+                  <span class="info-value">${new Date(activity.timestamp).toLocaleString()}</span>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">Call Type:</span>
+                  <span class="info-value">${activity.type}</span>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">Implementation:</span>
+                  <span class="info-value">${activity.implementationType}</span>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">Status Code:</span>
+                  <span class="info-value">${activity.statusCode || 'N/A'}</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="overview-section-inline">
+              <h4>📦 Mboxes</h4>
+              <div class="mbox-list">${mboxesHTML}</div>
+            </div>
+
+            <div class="overview-section-inline">
+              <h4>🎨 Modifications</h4>
+              ${modificationsHTML}
+            </div>
+          </div>
+
+          <div class="detail-tab-panel-inline" data-panel="request">
+            <pre class="json-display">${this.escapeHtml(requestJSON)}</pre>
+          </div>
+
+          <div class="detail-tab-panel-inline" data-panel="response">
+            <pre class="json-display">${this.escapeHtml(responseJSON)}</pre>
+          </div>
+
+          <div class="detail-tab-panel-inline" data-panel="tokens">
+            ${this.generateTokensHTML(activity.details?.responseTokens || {})}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  generateTokensHTML(tokens) {
+    if (!tokens || Object.keys(tokens).length === 0) {
+      return '<div class="no-data">No response tokens available</div>';
+    }
+
+    return `
+      <div class="tokens-table-inline">
+        ${Object.entries(tokens).map(([key, value]) => `
+          <div class="token-row-inline">
+            <div class="token-key">${this.escapeHtml(key)}:</div>
+            <div class="token-value">${this.escapeHtml(String(value))}</div>
+          </div>
+        `).join('')}
+      </div>
+    `;
   }
 
   selectActivity(activityId) {
@@ -1288,10 +2071,13 @@ class TargetPopup {
 
     if (this.activities.length > 0) {
       if (statusText) statusText.textContent = `${this.activities.length} Activities Detected`;
-      if (statusIndicator) statusIndicator.style.background = '#dc2626';
-    } else {
+      if (statusIndicator) statusIndicator.style.background = '#10b981';
+    } else if (this.isDebugging) {
       if (statusText) statusText.textContent = 'Monitoring Active - Refresh page to detect activities';
       if (statusIndicator) statusIndicator.style.background = '#ff9800';
+    } else {
+      if (statusText) statusText.textContent = 'Ready to monitor - Click Start Monitoring & Reload';
+      if (statusIndicator) statusIndicator.style.background = '#FA0F00';
     }
 
     // Update summary cards
@@ -1309,6 +2095,10 @@ class TargetPopup {
       });
       mboxCard.textContent = uniqueMboxes.size;
     }
+
+    // Update workflow steps and sidebar states
+    this.updateWorkflowSteps();
+    this.updateSidebarStates();
 
     this.hideLoading();
     this.updateActivityList();

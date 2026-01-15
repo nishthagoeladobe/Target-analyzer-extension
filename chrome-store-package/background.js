@@ -986,7 +986,24 @@ class AdobeTargetDebugger {
   }
 
   extractEventType(request) {
-    // Try to extract event type from POST data or URL
+    const url = request.url || '';
+    
+    // Check if this is a delivery call (at.js)
+    const isDeliveryCall = url.includes('tt.omtrdc.net/rest/v1/delivery') || 
+                          url.includes('tt.omtrdc.net/m2/') ||
+                          url.includes('/m2/');
+    
+    // For delivery calls, extract from URL or return generic
+    if (isDeliveryCall) {
+      // Try to extract mbox name from URL
+      const mboxMatch = url.match(/mbox=([^&]+)/);
+      if (mboxMatch) {
+        return decodeURIComponent(mboxMatch[1]);
+      }
+      return 'at.js.delivery';
+    }
+    
+    // For interact calls (Alloy/WebSDK), extract from POST data
     const postData = request.postData?.text;
     if (postData) {
       try {
@@ -1029,7 +1046,9 @@ class AdobeTargetDebugger {
         console.log('⚠️ DEBUGGER: Error parsing POST data for event type:', e.message);
       }
     }
-    return 'web.webpagedetails.pageViews'; // default for page views
+    
+    // Default based on call type
+    return isDeliveryCall ? 'at.js.delivery' : 'alloy.interact';
   }
 
   storeNetworkEvent(tabId, event) {

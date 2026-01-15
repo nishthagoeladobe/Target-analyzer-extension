@@ -606,11 +606,135 @@ class TargetPopup {
   }
 
   switchTab(tabName) {
+    // Check if tab is locked
+    const targetButton = document.querySelector(`.tab-button[data-tab="${tabName}"]`);
+    if (targetButton && targetButton.classList.contains('locked')) {
+      // Show tooltip explaining why it's locked
+      this.showLockedTabNotification(targetButton);
+      return;
+    }
+
     document.querySelectorAll('.tab-button').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.tab === tabName);
     });
     document.querySelectorAll('.tab-panel').forEach(panel => {
       panel.classList.toggle('active', panel.id === tabName);
+    });
+  }
+
+  showLockedTabNotification(button) {
+    const requirement = button.getAttribute('data-requires');
+    const tabName = button.getAttribute('data-tab');
+    let message = '';
+    
+    switch(requirement) {
+      case 'monitoring':
+        message = '⚠️ Please start monitoring first by clicking "🔍 Start Monitoring & Reload" in the Activities tab';
+        break;
+      case 'activities':
+        message = '⚠️ Please detect activities first by monitoring the page';
+        break;
+      default:
+        message = '⚠️ This tab requires prerequisites to be completed first';
+    }
+    
+    // Show temporary notification
+    const notification = document.createElement('div');
+    notification.className = 'tab-locked-notification';
+    notification.textContent = message;
+    notification.style.cssText = `
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: linear-gradient(135deg, #fef3c7 0%, #fef9c3 100%);
+      border: 2px solid #fbbf24;
+      color: #78350f;
+      padding: 16px 20px;
+      border-radius: 12px;
+      font-size: 13px;
+      font-weight: 600;
+      text-align: center;
+      z-index: 10000;
+      box-shadow: 0 8px 24px rgba(251, 191, 36, 0.3);
+      max-width: 320px;
+      animation: slideDown 0.3s ease;
+    `;
+    
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+      notification.style.animation = 'slideUp 0.3s ease';
+      setTimeout(() => notification.remove(), 300);
+    }, 3000);
+  }
+
+  updateWorkflowSteps() {
+    const isMonitoring = this.isDebugging;
+    const hasActivities = this.activities && this.activities.length > 0;
+    
+    const step1 = document.querySelector('.workflow-step[data-step="1"]');
+    const step2 = document.querySelector('.workflow-step[data-step="2"]');
+    const step3 = document.querySelector('.workflow-step[data-step="3"]');
+    
+    // Update Step 1: Start Monitoring
+    if (isMonitoring) {
+      step1?.classList.add('completed');
+      step1?.classList.remove('active');
+    } else {
+      step1?.classList.add('active');
+      step1?.classList.remove('completed');
+    }
+    
+    // Update Step 2: Detect Activities
+    if (hasActivities) {
+      step2?.classList.add('completed');
+      step2?.classList.remove('active');
+    } else if (isMonitoring) {
+      step2?.classList.add('active');
+      step2?.classList.remove('completed');
+    } else {
+      step2?.classList.remove('active', 'completed');
+    }
+    
+    // Update Step 3: Analyze Data
+    if (hasActivities) {
+      step3?.classList.add('active');
+      step3?.classList.remove('completed');
+    } else {
+      step3?.classList.remove('active', 'completed');
+    }
+  }
+
+  updateTabStates() {
+    const isMonitoring = this.isDebugging;
+    const hasActivities = this.activities && this.activities.length > 0;
+    
+    document.querySelectorAll('.tab-button').forEach(button => {
+      const requirement = button.getAttribute('data-requires');
+      const lockIcon = button.querySelector('.tab-lock');
+      
+      if (requirement === 'none') {
+        // Always available
+        button.classList.remove('locked');
+        return;
+      }
+      
+      if (requirement === 'monitoring') {
+        if (isMonitoring) {
+          button.classList.remove('locked');
+        } else {
+          button.classList.add('locked');
+        }
+      }
+      
+      if (requirement === 'activities') {
+        if (hasActivities) {
+          button.classList.remove('locked');
+        } else {
+          button.classList.add('locked');
+        }
+      }
     });
   }
 
@@ -1288,10 +1412,13 @@ class TargetPopup {
 
     if (this.activities.length > 0) {
       if (statusText) statusText.textContent = `${this.activities.length} Activities Detected`;
-      if (statusIndicator) statusIndicator.style.background = '#dc2626';
-    } else {
+      if (statusIndicator) statusIndicator.style.background = '#10b981';
+    } else if (this.isDebugging) {
       if (statusText) statusText.textContent = 'Monitoring Active - Refresh page to detect activities';
       if (statusIndicator) statusIndicator.style.background = '#ff9800';
+    } else {
+      if (statusText) statusText.textContent = 'Ready to monitor - Click Start Monitoring & Reload';
+      if (statusIndicator) statusIndicator.style.background = '#FA0F00';
     }
 
     // Update summary cards
@@ -1309,6 +1436,10 @@ class TargetPopup {
       });
       mboxCard.textContent = uniqueMboxes.size;
     }
+
+    // Update workflow steps and tab states
+    this.updateWorkflowSteps();
+    this.updateTabStates();
 
     this.hideLoading();
     this.updateActivityList();
